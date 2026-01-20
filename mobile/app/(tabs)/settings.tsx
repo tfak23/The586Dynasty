@@ -275,6 +275,8 @@ export default function SettingsScreen() {
                 style={settings.rookieDraftRounds === rounds ? styles.optionSelected : styles.option}
                 onPress={() => {
                   setRookieDraftRounds(rounds);
+                  // Auto-reset pick values when changing rounds
+                  resetPickValuesToSuggested(rounds);
                   setShowRoundsModal(false);
                 }}
               >

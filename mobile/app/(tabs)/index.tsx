@@ -88,16 +88,18 @@ export default function MyTeamScreen() {
   }
 
   // Filter picks based on settings - show all owned picks
-  const filteredPicks = (draftPicks || []).filter((p: any) => 
+  const filteredPicks = (draftPicks || []).filter((p: any) =>
     p.round <= settings.rookieDraftRounds
   );
-  
+
   // Calculate pick salary (only for 2026 picks when in offseason mode)
   const currentYearPicks = filteredPicks.filter((p: any) => p.season === 2026);
-  const pickSalary = settings.isOffseason 
+  const pickSalary = settings.isOffseason
     ? currentYearPicks.reduce((sum: number, pick: any) => sum + getPickValue(pick), 0)
     : 0;
-  const playerSalary = Number(capData?.total_salary) || 0;
+
+  // Calculate player salary directly from roster data (more accurate than backend view which may have stale season filtering)
+  const playerSalary = (roster || []).reduce((sum, contract) => sum + (Number(contract.salary) || 0), 0);
   const totalSalary = playerSalary + pickSalary;
   const deadMoney = Number(capData?.dead_money) || 0;
 

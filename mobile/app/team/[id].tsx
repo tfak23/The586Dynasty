@@ -108,8 +108,8 @@ export default function TeamDetailScreen() {
     grouped[pos as Position].sort((a: any, b: any) => (b.salary || 0) - (a.salary || 0));
   });
 
-  // Safely convert numeric values from database (might be strings)
-  const playerSalary = Number(capSummary?.total_salary) || 0;
+  // Calculate player salary directly from roster data (more accurate than backend view)
+  const playerSalary = contracts.reduce((sum: number, contract: any) => sum + (Number(contract.salary) || 0), 0);
   const totalSalary = playerSalary + pickSalary;
   const deadMoney = Number(capSummary?.dead_money) || 0;
   const capRoom = salaryCap - totalSalary - deadMoney;
