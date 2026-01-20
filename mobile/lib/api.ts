@@ -188,6 +188,38 @@ export const processTradeApproval = (id: string, approve: boolean, commissioner_
 export const cancelTrade = (id: string, team_id: string) =>
   api.post(`/api/trades/${id}/cancel`, { team_id });
 
+// Trade History
+export interface TradeHistoryItem {
+  type: 'player' | 'pick' | 'cap';
+  name?: string;
+  salary?: number;
+  yearsLeft?: number;
+  capAmount?: number;
+  capYear?: number;
+  pickYear?: number;
+  pickRound?: number;
+  originalOwner?: string;
+}
+
+export interface TradeHistory {
+  id: string;
+  trade_number: string;
+  trade_year: number;
+  team1_name: string;
+  team1_full_name?: string;
+  team1_received: TradeHistoryItem[];
+  team2_name: string;
+  team2_full_name?: string;
+  team2_received: TradeHistoryItem[];
+}
+
+export const getTradeHistory = (leagueId: string, params?: { year?: number; teamName?: string }) =>
+  api.get<{ data: TradeHistory[] }>(`/api/trade-history/league/${leagueId}`, { params });
+export const getTradeHistoryYears = (leagueId: string) =>
+  api.get<{ data: number[] }>(`/api/trade-history/league/${leagueId}/years`);
+export const getTradeHistoryTeams = (leagueId: string) =>
+  api.get<{ data: string[] }>(`/api/trade-history/league/${leagueId}/teams`);
+
 // Sync
 export const initializeLeague = (sleeper_league_id: string) =>
   api.post<{ data: any }>('/api/sync/initialize', { sleeper_league_id });

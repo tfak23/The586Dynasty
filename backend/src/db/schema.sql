@@ -369,6 +369,72 @@ CREATE TABLE sync_log (
 );
 
 -- =============================================
+-- CAP ADJUSTMENTS TABLE (trade dead money, cuts, etc.)
+-- =============================================
+CREATE TABLE cap_adjustments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    league_id UUID NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+
+    -- Type of adjustment
+    adjustment_type VARCHAR(50) NOT NULL, -- 'trade_cap_hit', 'player_cut', 'player_retirement', 'trade_cap_relief'
+
+    -- Reference to related entities (optional)
+    player_id UUID REFERENCES players(id),
+    contract_id UUID REFERENCES contracts(id),
+    trade_id UUID REFERENCES trades(id),
+
+    -- Description
+    description TEXT NOT NULL,
+    player_name VARCHAR(255),
+
+    -- Cap hit amounts by year
+    amount_2026 DECIMAL(10,2) DEFAULT 0,
+    amount_2027 DECIMAL(10,2) DEFAULT 0,
+    amount_2028 DECIMAL(10,2) DEFAULT 0,
+    amount_2029 DECIMAL(10,2) DEFAULT 0,
+    amount_2030 DECIMAL(10,2) DEFAULT 0,
+
+    -- Metadata
+    effective_date DATE,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- TRADE HISTORY TABLE (completed trades archive)
+-- =============================================
+CREATE TABLE trade_history (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    league_id UUID NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+
+    -- Trade identification
+    trade_number VARCHAR(20) NOT NULL, -- e.g., "26.01", "25.15"
+    trade_year INT NOT NULL,
+
+    -- Teams involved
+    team1_id UUID REFERENCES teams(id),
+    team1_name VARCHAR(255) NOT NULL,
+    team2_id UUID REFERENCES teams(id),
+    team2_name VARCHAR(255) NOT NULL,
+
+    -- What each team received (JSON array of items)
+    team1_received JSONB NOT NULL DEFAULT '[]',
+    team2_received JSONB NOT NULL DEFAULT '[]',
+
+    -- Cap implications
+    team1_cap_hit DECIMAL(10,2) DEFAULT 0,
+    team2_cap_hit DECIMAL(10,2) DEFAULT 0,
+
+    -- Metadata
+    trade_date DATE,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
 -- INDEXES FOR PERFORMANCE
 -- =============================================
 CREATE INDEX idx_contracts_team ON contracts(team_id, status);
@@ -381,34 +447,88 @@ CREATE INDEX idx_cap_transactions_team_season ON cap_transactions(team_id, seaso
 CREATE INDEX idx_players_sleeper_id ON players(sleeper_player_id);
 CREATE INDEX idx_players_search ON players(search_full_name);
 CREATE INDEX idx_expired_contracts_team ON expired_contracts(team_id, season);
+CREATE INDEX idx_cap_adjustments_team ON cap_adjustments(team_id);
+CREATE INDEX idx_cap_adjustments_league ON cap_adjustments(league_id);
+CREATE INDEX idx_trade_history_league ON trade_history(league_id);
+CREATE INDEX idx_trade_history_year ON trade_history(trade_year);
+CREATE INDEX idx_trade_history_teams ON trade_history(team1_id, team2_id);
 
 -- =============================================
 -- VIEWS FOR COMMON QUERIES
 -- =============================================
 
--- Team Cap Summary View
+-- Team Cap Summary View (includes season filtering and cap_adjustments)
 CREATE VIEW team_cap_summary AS
-SELECT 
+WITH contract_totals AS (
+    -- Get contract totals filtered by current season
+    SELECT
+        c.team_id,
+        t.league_id,
+        SUM(c.salary) as total_salary,
+        COUNT(c.id) as active_contracts,
+        SUM(c.years_remaining) as total_contract_years
+    FROM contracts c
+    JOIN teams t ON c.team_id = t.id
+    JOIN leagues l ON t.league_id = l.id
+    WHERE c.status = 'active'
+        AND c.start_season <= l.current_season
+        AND c.end_season >= l.current_season
+    GROUP BY c.team_id, t.league_id
+),
+dead_money_totals AS (
+    -- Get dead money from cap_transactions (player releases)
+    SELECT
+        ct.team_id,
+        t.league_id,
+        l.current_season,
+        SUM(ct.amount) as dead_money
+    FROM cap_transactions ct
+    JOIN teams t ON ct.team_id = t.id
+    JOIN leagues l ON t.league_id = l.id
+    WHERE ct.transaction_type = 'dead_money'
+        AND ct.season = l.current_season
+    GROUP BY ct.team_id, t.league_id, l.current_season
+),
+cap_adjustment_totals AS (
+    -- Get cap adjustments (trade dead money) for current season
+    SELECT
+        ca.team_id,
+        t.league_id,
+        l.current_season,
+        SUM(
+            CASE l.current_season
+                WHEN 2026 THEN COALESCE(ca.amount_2026, 0)
+                WHEN 2027 THEN COALESCE(ca.amount_2027, 0)
+                WHEN 2028 THEN COALESCE(ca.amount_2028, 0)
+                WHEN 2029 THEN COALESCE(ca.amount_2029, 0)
+                WHEN 2030 THEN COALESCE(ca.amount_2030, 0)
+                ELSE 0
+            END
+        ) as cap_adjustment
+    FROM cap_adjustments ca
+    JOIN teams t ON ca.team_id = t.id
+    JOIN leagues l ON t.league_id = l.id
+    GROUP BY ca.team_id, t.league_id, l.current_season
+)
+SELECT
     t.id as team_id,
     t.team_name,
     t.owner_name,
     l.salary_cap,
     l.current_season,
-    COALESCE(SUM(c.salary), 0) as total_salary,
-    l.salary_cap - COALESCE(SUM(c.salary), 0) as cap_room,
-    COUNT(c.id) as active_contracts,
-    COALESCE(SUM(c.years_remaining), 0) as total_contract_years,
-    COALESCE(dm.dead_money, 0) as dead_money
+    COALESCE(ct.total_salary, 0) as total_salary,
+    COALESCE(ct.active_contracts, 0)::int as active_contracts,
+    COALESCE(ct.total_contract_years, 0) as total_contract_years,
+    COALESCE(dm.dead_money, 0) + COALESCE(cat.cap_adjustment, 0) as dead_money,
+    l.salary_cap
+        - COALESCE(ct.total_salary, 0)
+        - COALESCE(dm.dead_money, 0)
+        - COALESCE(cat.cap_adjustment, 0) as cap_room
 FROM teams t
 JOIN leagues l ON t.league_id = l.id
-LEFT JOIN contracts c ON c.team_id = t.id AND c.status = 'active'
-LEFT JOIN (
-    SELECT team_id, season, SUM(amount) as dead_money
-    FROM cap_transactions
-    WHERE transaction_type = 'dead_money'
-    GROUP BY team_id, season
-) dm ON dm.team_id = t.id AND dm.season = l.current_season
-GROUP BY t.id, t.team_name, t.owner_name, l.salary_cap, l.current_season, dm.dead_money;
+LEFT JOIN contract_totals ct ON ct.team_id = t.id AND ct.league_id = l.id
+LEFT JOIN dead_money_totals dm ON dm.team_id = t.id AND dm.league_id = l.id
+LEFT JOIN cap_adjustment_totals cat ON cat.team_id = t.id AND cat.league_id = l.id;
 
 -- Team Contract Years View
 CREATE VIEW team_contract_years AS

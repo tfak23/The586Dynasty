@@ -54,13 +54,11 @@ export default function TabLayout() {
           ),
         }}
       />
+      {/* History tab removed - consolidated into Trades tab "Completed" filter */}
       <Tabs.Screen
         name="history"
         options={{
-          title: 'History',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="time" size={size} color={color} />
-          ),
+          href: null, // Hide from tab bar but keep file for routing
         }}
       />
       <Tabs.Screen

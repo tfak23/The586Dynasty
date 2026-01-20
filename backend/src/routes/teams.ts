@@ -192,48 +192,71 @@ teamRoutes.get('/:id/cap-projection', async (req, res, next) => {
     if (!team) {
       throw new AppError('Team not found', 404);
     }
-    
+
     const league = await queryOne('SELECT * FROM leagues WHERE id = $1', [team.league_id]);
     if (!league) {
       throw new AppError('League not found', 404);
     }
-    
+
     const currentSeason = league.current_season;
     const projections = [];
-    
+
     for (let year = 0; year < 5; year++) {
       const season = currentSeason + year;
-      
+
+      // Get contract totals for this season
       const contracts = await query(
         `SELECT SUM(salary) as total_salary, COUNT(*) as contract_count
          FROM contracts
-         WHERE team_id = $1 
+         WHERE team_id = $1
            AND status = 'active'
-           AND start_season <= $2 
+           AND start_season <= $2
            AND end_season >= $2`,
         [req.params.id, season]
       );
-      
+
+      // Get dead money from cap_transactions (player releases)
       const deadMoney = await queryOne(
         `SELECT COALESCE(SUM(amount), 0) as total
          FROM cap_transactions
          WHERE team_id = $1 AND season = $2 AND transaction_type = 'dead_money'`,
         [req.params.id, season]
       );
-      
+
+      // Get cap adjustments (trade dead money) for this specific year
+      const capAdjustments = await queryOne(
+        `SELECT COALESCE(SUM(
+           CASE $2::int
+             WHEN 2026 THEN amount_2026
+             WHEN 2027 THEN amount_2027
+             WHEN 2028 THEN amount_2028
+             WHEN 2029 THEN amount_2029
+             WHEN 2030 THEN amount_2030
+             ELSE 0
+           END
+         ), 0) as total
+         FROM cap_adjustments
+         WHERE team_id = $1`,
+        [req.params.id, season]
+      );
+
       const totalSalary = parseFloat(contracts[0]?.total_salary || '0');
       const totalDeadMoney = parseFloat(deadMoney?.total || '0');
-      
+      const totalCapAdjustments = parseFloat(capAdjustments?.total || '0');
+      const combinedDeadMoney = totalDeadMoney + totalCapAdjustments;
+
       projections.push({
         season,
         committed_salary: totalSalary,
-        dead_money: totalDeadMoney,
-        total_cap_used: totalSalary + totalDeadMoney,
-        cap_room: league.salary_cap - totalSalary - totalDeadMoney,
+        dead_money_releases: totalDeadMoney,
+        dead_money_trades: totalCapAdjustments,
+        dead_money: combinedDeadMoney,
+        total_cap_used: totalSalary + combinedDeadMoney,
+        cap_room: league.salary_cap - totalSalary - combinedDeadMoney,
         contract_count: parseInt(contracts[0]?.contract_count || '0'),
       });
     }
-    
+
     res.json({
       status: 'success',
       data: {
