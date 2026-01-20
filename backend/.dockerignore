@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+*.log
+dist
+.git
+.gitignore
+.dockerignore
+Dockerfile
+cloudbuild.yaml
+README.md
+*.md
+.vscode
+.idea
+coverage
+.nyc_output
