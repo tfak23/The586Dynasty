@@ -30,6 +30,12 @@ export const colors = {
   wr: '#3B82F6', // Blue
   te: '#F59E0B', // Amber
 
+  // Position colors (alternate naming for convenience)
+  positionQB: '#EF4444',
+  positionRB: '#10B981',
+  positionWR: '#3B82F6',
+  positionTE: '#F59E0B',
+
   // Cap status colors
   capHealthy: '#10B981',
   capWarning: '#F59E0B',

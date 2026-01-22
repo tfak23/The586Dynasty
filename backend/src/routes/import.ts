@@ -6,7 +6,7 @@ import type { ImportResult, CSVImportRow } from '../types/index.js';
 
 export const importRoutes = Router();
 
-const CURRENT_SEASON = 2025;
+const CURRENT_SEASON = 2026;
 
 // Owner name mapping (CSV name -> Sleeper display name)
 const OWNER_NAME_MAP: Record<string, string> = {
@@ -57,8 +57,8 @@ function parseCSVRow(row: CSVImportRow): ParsedContract | null {
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Parse year columns
-  const yearColumns = ['2025', '2026', '2027', '2028', '2029'] as const;
+  // Parse year columns (2026-2030 for current 5-year window)
+  const yearColumns = ['2026', '2027', '2028', '2029', '2030'] as const;
   const yearValues = yearColumns.map(y => {
     const val = row[y]?.toString().trim();
     if (!val || val === '') return null;
@@ -70,7 +70,7 @@ function parseCSVRow(row: CSVImportRow): ParsedContract | null {
   // Find option year (if any)
   const optionIndex = yearValues.findIndex(v => v === 'OPT');
   const hasOption = optionIndex !== -1;
-  const optionYear = hasOption ? 2025 + optionIndex : null;
+  const optionYear = hasOption ? 2026 + optionIndex : null;
 
   // Count active contract years (has salary value, not blank, not OPT)
   const activeYears = yearValues.filter(v => v !== null && v !== 'OPT').length;
@@ -79,7 +79,7 @@ function parseCSVRow(row: CSVImportRow): ParsedContract | null {
   let endSeason = CURRENT_SEASON;
   for (let i = yearColumns.length - 1; i >= 0; i--) {
     if (yearValues[i] !== null && yearValues[i] !== 'OPT') {
-      endSeason = 2025 + i;
+      endSeason = 2026 + i;
       break;
     }
   }

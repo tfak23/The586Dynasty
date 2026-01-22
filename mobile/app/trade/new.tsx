@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Modal } from 'react-native';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -20,7 +20,7 @@ const formatPickDisplay = (pick: any) => {
 };
 
 type SelectedAsset = {
-  type: 'player' | 'pick';
+  type: 'player' | 'pick' | 'cap';
   id: string;
   name: string;
   fromTeamId: string;
@@ -29,6 +29,9 @@ type SelectedAsset = {
   // For picks
   season?: number;
   round?: number;
+  // For cap space
+  capAmount?: number;
+  capYear?: number;
 };
 
 export default function NewTradeScreen() {
@@ -50,6 +53,11 @@ export default function NewTradeScreen() {
   const [notes, setNotes] = useState('');
   const [step, setStep] = useState<'teams' | 'assets' | 'review'>('teams');
   const [activeSelector, setActiveSelector] = useState<'mine' | 'theirs' | null>(null);
+  // Cap space modal state
+  const [showCapModal, setShowCapModal] = useState(false);
+  const [capModalIsMine, setCapModalIsMine] = useState(true);
+  const [capAmount, setCapAmount] = useState('');
+  const [capYear, setCapYear] = useState(2026);
 
   const { data: teams } = useQuery({
     queryKey: ['teams', currentLeague?.id],
@@ -105,37 +113,102 @@ export default function NewTradeScreen() {
     enabled: !!tradingPartner && step === 'assets',
   });
 
+  // Helper to add cap space
+  const addCapSpace = () => {
+    const amount = parseFloat(capAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Error', 'Please enter a valid cap amount');
+      return;
+    }
+
+    const capAsset: SelectedAsset = {
+      type: 'cap',
+      id: `cap-${Date.now()}`,
+      name: `$${amount} cap (${capYear})`,
+      fromTeamId: capModalIsMine ? currentTeam?.id || '' : tradingPartner?.id || '',
+      capAmount: amount,
+      capYear: capYear,
+    };
+
+    if (capModalIsMine) {
+      setMyAssets([...myAssets, capAsset]);
+    } else {
+      setTheirAssets([...theirAssets, capAsset]);
+    }
+
+    setShowCapModal(false);
+    setCapAmount('');
+    setCapYear(2026);
+  };
+
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!currentLeague || !currentTeam || !tradingPartner) {
         throw new Error('Missing required data');
       }
 
-      // Format trade payload
-      const tradeTeams = [
-        {
-          teamId: currentTeam.id,
-          sending: myAssets.map(a => ({
-            type: a.type,
-            id: a.type === 'player' ? a.id : undefined,
-            draftPickId: a.type === 'pick' ? a.id : undefined,
-          })),
-        },
-        {
-          teamId: tradingPartner.id,
-          sending: theirAssets.map(a => ({
-            type: a.type,
-            id: a.type === 'player' ? a.id : undefined,
-            draftPickId: a.type === 'pick' ? a.id : undefined,
-          })),
-        },
-      ];
+      // Build assets array for the new trade API format
+      const assets = [];
+
+      // My assets go TO trading partner
+      for (const asset of myAssets) {
+        if (asset.type === 'player') {
+          assets.push({
+            from_team_id: currentTeam.id,
+            to_team_id: tradingPartner.id,
+            asset_type: 'contract',
+            contract_id: asset.id,
+          });
+        } else if (asset.type === 'pick') {
+          assets.push({
+            from_team_id: currentTeam.id,
+            to_team_id: tradingPartner.id,
+            asset_type: 'draft_pick',
+            draft_pick_id: asset.id,
+          });
+        } else if (asset.type === 'cap') {
+          assets.push({
+            from_team_id: currentTeam.id,
+            to_team_id: tradingPartner.id,
+            asset_type: 'cap_space',
+            cap_amount: asset.capAmount,
+            cap_year: asset.capYear,
+          });
+        }
+      }
+
+      // Their assets come TO me
+      for (const asset of theirAssets) {
+        if (asset.type === 'player') {
+          assets.push({
+            from_team_id: tradingPartner.id,
+            to_team_id: currentTeam.id,
+            asset_type: 'contract',
+            contract_id: asset.id,
+          });
+        } else if (asset.type === 'pick') {
+          assets.push({
+            from_team_id: tradingPartner.id,
+            to_team_id: currentTeam.id,
+            asset_type: 'draft_pick',
+            draft_pick_id: asset.id,
+          });
+        } else if (asset.type === 'cap') {
+          assets.push({
+            from_team_id: tradingPartner.id,
+            to_team_id: currentTeam.id,
+            asset_type: 'cap_space',
+            cap_amount: asset.capAmount,
+            cap_year: asset.capYear,
+          });
+        }
+      }
 
       return createTrade({
         league_id: currentLeague.id,
-        teams: tradeTeams,
+        team_ids: [currentTeam.id, tradingPartner.id],
+        assets,
         notes,
-        initiatedBy: currentTeam.id,
       });
     },
     onSuccess: () => {
@@ -304,6 +377,36 @@ export default function NewTradeScreen() {
         {picks.length === 0 && (
           <Text style={styles.noAssetsText}>No draft picks available</Text>
         )}
+
+        {/* Cap Space Section */}
+        <Text style={styles.assetGroupLabel}>Cap Space</Text>
+        {selectedAssets.filter(a => a.type === 'cap').map(capAsset => (
+          <TouchableOpacity
+            key={capAsset.id}
+            style={styles.assetOptionSelected}
+            onPress={() => toggleAsset(capAsset, isMine)}
+          >
+            <View style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: borderRadius.sm, marginRight: spacing.sm, backgroundColor: colors.warning }}>
+              <Text style={styles.positionText}>CAP</Text>
+            </View>
+            <View style={styles.assetInfo}>
+              <Text style={styles.assetName}>${capAsset.capAmount} cap relief</Text>
+              <Text style={styles.assetDetails}>Year: {capAsset.capYear}</Text>
+            </View>
+            <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
+          </TouchableOpacity>
+        ))}
+
+        <TouchableOpacity
+          style={styles.addCapButton}
+          onPress={() => {
+            setCapModalIsMine(isMine);
+            setShowCapModal(true);
+          }}
+        >
+          <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+          <Text style={styles.addCapButtonText}>Add Cap Space</Text>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -356,14 +459,29 @@ export default function NewTradeScreen() {
         {/* Your side */}
         <View style={styles.reviewSection}>
           <Text style={styles.reviewTeamName}>{currentTeam?.team_name} sends:</Text>
-          {myAssets.map(asset => (
-            <View key={asset.id} style={styles.reviewAsset}>
-              <View style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: borderRadius.sm, marginRight: spacing.sm, backgroundColor: positionColors[asset.position as Position] || colors.textMuted }}>
-                <Text style={styles.positionText}>{asset.position || 'Pick'}</Text>
+          {myAssets.map(asset => {
+            // Determine badge color and text based on asset type
+            let badgeColor = colors.textMuted;
+            let badgeText = 'PICK';
+            if (asset.type === 'player' && asset.position) {
+              badgeColor = positionColors[asset.position as Position] || colors.textMuted;
+              badgeText = asset.position;
+            } else if (asset.type === 'pick') {
+              badgeColor = colors.secondary;
+              badgeText = 'PICK';
+            } else if (asset.type === 'cap') {
+              badgeColor = colors.warning;
+              badgeText = 'CAP';
+            }
+            return (
+              <View key={asset.id} style={styles.reviewAsset}>
+                <View style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: borderRadius.sm, marginRight: spacing.sm, backgroundColor: badgeColor }}>
+                  <Text style={styles.positionText}>{badgeText}</Text>
+                </View>
+                <Text style={styles.reviewAssetName}>{asset.name}</Text>
               </View>
-              <Text style={styles.reviewAssetName}>{asset.name}</Text>
-            </View>
-          ))}
+            );
+          })}
           {myAssets.length === 0 && (
             <Text style={styles.noAssetsText}>Nothing</Text>
           )}
@@ -376,14 +494,29 @@ export default function NewTradeScreen() {
         {/* Their side */}
         <View style={styles.reviewSection}>
           <Text style={styles.reviewTeamName}>{tradingPartner?.team_name} sends:</Text>
-          {theirAssets.map(asset => (
-            <View key={asset.id} style={styles.reviewAsset}>
-              <View style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: borderRadius.sm, marginRight: spacing.sm, backgroundColor: positionColors[asset.position as Position] || colors.textMuted }}>
-                <Text style={styles.positionText}>{asset.position || 'Pick'}</Text>
+          {theirAssets.map(asset => {
+            // Determine badge color and text based on asset type
+            let badgeColor = colors.textMuted;
+            let badgeText = 'PICK';
+            if (asset.type === 'player' && asset.position) {
+              badgeColor = positionColors[asset.position as Position] || colors.textMuted;
+              badgeText = asset.position;
+            } else if (asset.type === 'pick') {
+              badgeColor = colors.secondary;
+              badgeText = 'PICK';
+            } else if (asset.type === 'cap') {
+              badgeColor = colors.warning;
+              badgeText = 'CAP';
+            }
+            return (
+              <View key={asset.id} style={styles.reviewAsset}>
+                <View style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: borderRadius.sm, marginRight: spacing.sm, backgroundColor: badgeColor }}>
+                  <Text style={styles.positionText}>{badgeText}</Text>
+                </View>
+                <Text style={styles.reviewAssetName}>{asset.name}</Text>
               </View>
-              <Text style={styles.reviewAssetName}>{asset.name}</Text>
-            </View>
-          ))}
+            );
+          })}
           {theirAssets.length === 0 && (
             <Text style={styles.noAssetsText}>Nothing</Text>
           )}
@@ -468,6 +601,60 @@ export default function NewTradeScreen() {
       {step === 'teams' && renderTeamSelection()}
       {step === 'assets' && renderAssetSelection()}
       {step === 'review' && renderReview()}
+
+      {/* Cap Space Modal */}
+      <Modal
+        visible={showCapModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowCapModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Cap Space</Text>
+              <TouchableOpacity onPress={() => setShowCapModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalDescription}>
+              {capModalIsMine
+                ? `${currentTeam?.team_name} will absorb this cap hit (the other team gets cap relief)`
+                : `${tradingPartner?.team_name} will absorb this cap hit (you get cap relief)`}
+            </Text>
+
+            <Text style={styles.inputLabel}>Cap Amount ($)</Text>
+            <TextInput
+              style={styles.capInput}
+              value={capAmount}
+              onChangeText={setCapAmount}
+              placeholder="e.g., 10"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="numeric"
+            />
+
+            <Text style={styles.inputLabel}>Year</Text>
+            <View style={styles.yearButtons}>
+              {[2026, 2027, 2028, 2029, 2030].map(year => (
+                <TouchableOpacity
+                  key={year}
+                  style={capYear === year ? styles.yearButtonActive : styles.yearButton}
+                  onPress={() => setCapYear(year)}
+                >
+                  <Text style={capYear === year ? styles.yearButtonTextActive : styles.yearButtonText}>
+                    {year}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity style={styles.addCapConfirmButton} onPress={addCapSpace}>
+              <Text style={styles.addCapConfirmText}>Add Cap Space</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -794,5 +981,99 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: fontSize.md,
     marginRight: spacing.sm,
+  },
+  // Cap space styles
+  addCapButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.primary,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.sm,
+  },
+  addCapButtonText: {
+    color: colors.primary,
+    fontWeight: '600',
+    marginLeft: spacing.sm,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    padding: spacing.lg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    fontSize: fontSize.xl,
+    fontWeight: 'bold',
+    color: colors.text,
+  },
+  modalDescription: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.lg,
+  },
+  inputLabel: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  capInput: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    fontSize: fontSize.lg,
+    color: colors.text,
+    marginBottom: spacing.lg,
+  },
+  yearButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  yearButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  yearButtonActive: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary,
+  },
+  yearButtonText: {
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  yearButtonTextActive: {
+    color: colors.white,
+    fontWeight: '600',
+  },
+  addCapConfirmButton: {
+    backgroundColor: colors.primary,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+  },
+  addCapConfirmText: {
+    color: colors.white,
+    fontWeight: 'bold',
+    fontSize: fontSize.md,
   },
 });

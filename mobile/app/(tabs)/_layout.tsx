@@ -46,6 +46,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="players"
+        options={{
+          title: 'Players',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="people-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="trades"
         options={{
           title: 'Trades',
@@ -54,22 +63,17 @@ export default function TabLayout() {
           ),
         }}
       />
+      {/* History tab removed - consolidated into Trades tab "Completed" filter */}
       <Tabs.Screen
         name="history"
         options={{
-          title: 'History',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="time" size={size} color={color} />
-          ),
+          href: null, // Hide from tab bar but keep file for routing
         }}
       />
       <Tabs.Screen
         name="projections"
         options={{
-          title: 'Cap',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="trending-up" size={size} color={color} />
-          ),
+          href: null, // Hide from tab bar but keep for routing
         }}
       />
       <Tabs.Screen

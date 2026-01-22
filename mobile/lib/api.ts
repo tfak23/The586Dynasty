@@ -129,12 +129,82 @@ export const getTeamCap = (teamId: string) =>
 export const getTeamCapSummary = getTeamCap;
 export const getLeagueCapSummary = (leagueId: string) =>
   api.get<{ data: TeamCapSummary[] }>(`/api/teams/league/${leagueId}/cap`);
+export const getLeagueCapDetailed = (leagueId: string) =>
+  api.get<{ data: any[] }>(`/api/teams/league/${leagueId}/cap-detailed`);
 export const getTeamRoster = (teamId: string) =>
   api.get<{ data: Contract[] }>(`/api/teams/${teamId}/roster`);
 export const getTeamCapProjection = (teamId: string) =>
   api.get<{ data: any }>(`/api/teams/${teamId}/cap-projection`);
 export const getTeamDraftPicks = (teamId: string) =>
   api.get<{ data: any[] }>(`/api/teams/${teamId}/draft-picks`);
+export const getLeagueDraftPicks = (leagueId: string) =>
+  api.get<{ data: any[] }>(`/api/teams/league/${leagueId}/draft-picks`);
+export const getTeamDeadCapBreakdown = (teamId: string) =>
+  api.get<{ data: DeadCapBreakdown }>(`/api/teams/${teamId}/dead-cap-breakdown`);
+export const updateTeam = (teamId: string, data: Partial<Team>) =>
+  api.patch<{ data: Team }>(`/api/teams/${teamId}`, data);
+export const getTeamCapAdjustments = (teamId: string) =>
+  api.get<{ data: { adjustments: CapAdjustment[]; totals: CapAdjustmentTotals } }>(`/api/teams/${teamId}/cap-adjustments`);
+export const createCapAdjustment = (teamId: string, data: CreateCapAdjustmentRequest) =>
+  api.post<{ data: CapAdjustment }>(`/api/teams/${teamId}/cap-adjustment`, data);
+export const deleteCapAdjustment = (teamId: string, adjustmentId: string) =>
+  api.delete<{ data: { deleted: boolean; id: string } }>(`/api/teams/${teamId}/cap-adjustment/${adjustmentId}`);
+
+// Cap Adjustment Types
+export interface CapAdjustment {
+  id: string;
+  team_id: string;
+  reason: string;
+  amount_2026: number;
+  amount_2027: number;
+  amount_2028: number;
+  amount_2029: number;
+  amount_2030: number;
+  trade_id?: string;
+  created_at: string;
+}
+
+export interface CapAdjustmentTotals {
+  total_2026: number;
+  total_2027: number;
+  total_2028: number;
+  total_2029: number;
+  total_2030: number;
+}
+
+export interface CreateCapAdjustmentRequest {
+  reason: string;
+  amount_2026?: number;
+  amount_2027?: number;
+  amount_2028?: number;
+  amount_2029?: number;
+  amount_2030?: number;
+  trade_id?: string;
+}
+
+// Dead Cap Breakdown Types
+export interface DeadCapBreakdownItem {
+  type: 'release' | 'trade';
+  player_name?: string;
+  position?: string;
+  amount: number;
+  reason?: string;
+  trade_id?: string;
+  date: string;
+}
+
+export interface DeadCapBreakdown {
+  season: number;
+  total_dead_cap: number;
+  releases: {
+    total: number;
+    items: DeadCapBreakdownItem[];
+  };
+  trades: {
+    total: number;
+    items: DeadCapBreakdownItem[];
+  };
+}
 
 // Contracts
 export const getContracts = (leagueId: string, params?: { status?: string; position?: string; team_id?: string }) =>
@@ -155,6 +225,48 @@ export const getRookieValues = () =>
   api.get<{ data: Record<string, number> }>('/api/contracts/rookie-values/all');
 export const getMinimumSalaries = () =>
   api.get<{ data: Record<number, number> }>('/api/contracts/minimum-salaries/all');
+export const getContractEvaluation = (contractId: string, leagueId: string) =>
+  api.get<{ data: ContractEvaluation }>(`/api/contracts/${contractId}/evaluation/${leagueId}`);
+export const getLeagueContractRankings = (leagueId: string) =>
+  api.get<{ data: any[] }>(`/api/contracts/league/${leagueId}/rankings`);
+
+// Get signed players with evaluation data
+export interface SignedPlayerContract extends Contract {
+  age: number | null;
+  evaluation?: {
+    rating: ContractRating;
+    value_score: number;
+    rank: number;
+  } | null;
+}
+
+export const getSignedPlayers = (
+  leagueId: string,
+  params?: { position?: string; rating?: string }
+) =>
+  api.get<{ data: SignedPlayerContract[] }>(
+    `/api/contracts/league/${leagueId}/with-evaluations`,
+    { params }
+  );
+
+// Contract Evaluation Types
+export type ContractRating = 'ROOKIE' | 'BUST' | 'GOOD' | 'STEAL' | 'LEGENDARY';
+
+export interface ContractEvaluation {
+  rating: ContractRating;
+  value_score: number;
+  actual_salary: number;
+  estimated_salary: number;
+  salary_difference: number;
+  league_rank: number | null;
+  total_contracts: number;
+  comparable_contracts: any[];
+  reasoning: string;
+  player_stats?: {
+    ppg: number;
+    games_played: number;
+  };
+}
 
 // Players
 export const searchPlayers = (q: string, position?: string) =>
@@ -164,8 +276,12 @@ export const getPlayerContracts = (playerId: string, leagueId?: string) =>
   api.get<{ data: Contract[] }>(`/api/players/${playerId}/contracts`, { params: { league_id: leagueId } });
 export const getTopSalaries = (leagueId: string, position?: string, limit?: number) =>
   api.get<{ data: any[] }>(`/api/players/league/${leagueId}/top-salaries`, { params: { position, limit } });
-export const getFreeAgents = (leagueId: string, params?: { position?: string; season?: number }) =>
+export const getFreeAgents = (leagueId: string, params?: { position?: string; season?: number; search?: string }) =>
   api.get<{ data: any[] }>(`/api/players/league/${leagueId}/free-agents`, { params });
+export const getPlayerEstimate = (playerId: string, leagueId: string) =>
+  api.get<{ data: any }>(`/api/players/${playerId}/estimate/${leagueId}`);
+export const getPlayerStats = (playerId: string, season?: number) =>
+  api.get<{ data: any[] }>(`/api/players/${playerId}/stats`, { params: { season } });
 
 // Trades
 export const getTrades = (leagueId: string, status?: string) =>
@@ -188,6 +304,38 @@ export const processTradeApproval = (id: string, approve: boolean, commissioner_
 export const cancelTrade = (id: string, team_id: string) =>
   api.post(`/api/trades/${id}/cancel`, { team_id });
 
+// Trade History
+export interface TradeHistoryItem {
+  type: 'player' | 'pick' | 'cap';
+  name?: string;
+  salary?: number;
+  yearsLeft?: number;
+  capAmount?: number;
+  capYear?: number;
+  pickYear?: number;
+  pickRound?: number;
+  originalOwner?: string;
+}
+
+export interface TradeHistory {
+  id: string;
+  trade_number: string;
+  trade_year: number;
+  team1_name: string;
+  team1_full_name?: string;
+  team1_received: TradeHistoryItem[];
+  team2_name: string;
+  team2_full_name?: string;
+  team2_received: TradeHistoryItem[];
+}
+
+export const getTradeHistory = (leagueId: string, params?: { year?: number; teamName?: string }) =>
+  api.get<{ data: TradeHistory[] }>(`/api/trade-history/league/${leagueId}`, { params });
+export const getTradeHistoryYears = (leagueId: string) =>
+  api.get<{ data: number[] }>(`/api/trade-history/league/${leagueId}/years`);
+export const getTradeHistoryTeams = (leagueId: string) =>
+  api.get<{ data: string[] }>(`/api/trade-history/league/${leagueId}/teams`);
+
 // Sync
 export const initializeLeague = (sleeper_league_id: string) =>
   api.post<{ data: any }>('/api/sync/initialize', { sleeper_league_id });
@@ -195,11 +343,137 @@ export const syncLeague = (leagueId: string) =>
   api.post<{ data: any }>(`/api/sync/league/${leagueId}/full`);
 export const syncRosters = (leagueId: string) =>
   api.post<{ data: any }>(`/api/sync/league/${leagueId}/rosters`);
+export const getLastSyncTime = (leagueId: string) =>
+  api.get<{ data: { last_sync: string | null; minutes_ago: number | null } }>(`/api/sync/league/${leagueId}/last-sync`);
+export const syncStats = (season: number, leagueId?: string) =>
+  api.post<{ data: any }>(`/api/sync/stats/${season}`, { league_id: leagueId }, { timeout: 120000 }); // 2 min timeout for stats
+export const syncPlayers = () =>
+  api.post<{ data: { synced: number; skipped: number } }>('/api/players/sync', {}, { timeout: 300000 }); // 5 min timeout for large player sync
 
 // Import
 export const importCSV = (leagueId: string, csvData: string, dryRun?: boolean) =>
   api.post<{ data: any }>(`/api/import/csv/${leagueId}`, { csvData, dryRun });
 export const previewCSV = (leagueId: string, csvData: string) =>
   api.post<{ data: any }>(`/api/import/preview/${leagueId}`, { csvData });
+
+// =============================================
+// LEAGUE RULES
+// =============================================
+export interface LeagueRules {
+  buyIn?: {
+    amount: number;
+    payouts: { place: number; amount: number; label?: string }[];
+  };
+  salaryCap?: {
+    hardCap: number;
+    minYears: number;
+    maxYears: number;
+    minimumSalaries?: Record<number, number>;
+  };
+  keyDates?: {
+    event: string;
+    week: string;
+    description: string;
+  }[];
+  deadCapTable?: number[][];
+  tradeRules?: string[];
+  rookieRules?: string[];
+  tankingRules?: string[];
+  raw?: string;
+}
+
+export const getLeagueRules = (leagueId: string) =>
+  api.get<{ data: LeagueRules | null }>(`/api/leagues/${leagueId}/rules`);
+export const updateLeagueRules = (leagueId: string, rules: LeagueRules) =>
+  api.put<{ data: League }>(`/api/leagues/${leagueId}/rules`, { rules });
+
+// =============================================
+// LEAGUE HISTORY (Owner Statistics)
+// =============================================
+export interface LeagueHistoryRecord {
+  id: string;
+  league_id: string;
+  owner_name: string;
+  phone?: string;
+  titles: number;
+  sb_appearances: number;
+  division_titles: number;
+  playoff_appearances: number;
+  total_winnings: number;
+  total_buy_ins: number;
+  net_winnings: number;
+  total_wins: number;
+  total_losses: number;
+  total_ties: number;
+  total_points: number;
+  win_percentage: number;
+  legacy_score: number;
+  season_records: {
+    season: number;
+    wins: number;
+    losses: number;
+    ties?: number;
+    points: number;
+    placing?: number;
+    playoffs?: boolean;
+    title?: boolean;
+    division?: boolean;
+  }[];
+  current_team_id?: string;
+  current_team_name?: string;
+  is_active: boolean;
+}
+
+export const getLeagueHistory = (leagueId: string, activeOnly?: boolean) =>
+  api.get<{ data: LeagueHistoryRecord[] }>(`/api/leagues/${leagueId}/history`, {
+    params: activeOnly ? { active_only: 'true' } : undefined,
+  });
+export const getLeagueHistoryRecord = (leagueId: string, historyId: string) =>
+  api.get<{ data: LeagueHistoryRecord }>(`/api/leagues/${leagueId}/history/${historyId}`);
+export const updateLeagueHistory = (leagueId: string, historyId: string, data: Partial<LeagueHistoryRecord>) =>
+  api.put<{ data: LeagueHistoryRecord }>(`/api/leagues/${leagueId}/history/${historyId}`, data);
+export const createLeagueHistory = (leagueId: string, data: Partial<LeagueHistoryRecord>) =>
+  api.post<{ data: LeagueHistoryRecord }>(`/api/leagues/${leagueId}/history`, data);
+
+// =============================================
+// LEAGUE BUY-INS
+// =============================================
+export interface LeagueBuyIn {
+  id: string;
+  league_id: string;
+  team_id?: string;
+  team_name?: string;
+  season: number;
+  owner_name: string;
+  amount_due: number;
+  amount_paid: number;
+  status: 'paid' | 'partial' | 'unpaid';
+  paid_date?: string;
+  payment_method?: string;
+  notes?: string;
+}
+
+export interface BuyInTotals {
+  total_due: number;
+  total_paid: number;
+  paid_count: number;
+  partial_count: number;
+  unpaid_count: number;
+}
+
+export const getLeagueBuyIns = (leagueId: string, season?: number) =>
+  api.get<{ data: { season: number; buy_ins: LeagueBuyIn[]; totals: BuyInTotals } }>(
+    `/api/leagues/${leagueId}/buy-ins`,
+    { params: season ? { season } : undefined }
+  );
+export const getBuyInSeasons = (leagueId: string) =>
+  api.get<{ data: number[] }>(`/api/leagues/${leagueId}/buy-ins/seasons`);
+export const updateBuyIn = (leagueId: string, buyInId: string, data: Partial<LeagueBuyIn>) =>
+  api.put<{ data: LeagueBuyIn }>(`/api/leagues/${leagueId}/buy-ins/${buyInId}`, data);
+export const initializeBuyIns = (leagueId: string, season: number, amountDue?: number) =>
+  api.post<{ data: { season: number; created: number; buy_ins: LeagueBuyIn[] } }>(
+    `/api/leagues/${leagueId}/buy-ins/initialize`,
+    { season, amount_due: amountDue }
+  );
 
 export default api;

@@ -1,29 +1,68 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'expo-router';
+import { Link, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, borderRadius, getCapStatusColor } from '@/lib/theme';
-import { getLeagueCapSummary, TeamCapSummary } from '@/lib/api';
+import { getLeagueCapDetailed, getLeagueDraftPicks } from '@/lib/api';
 import { useAppStore } from '@/lib/store';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 
 export default function LeagueScreen() {
-  const { currentLeague, currentTeam } = useAppStore();
+  const { currentLeague, currentTeam, settings } = useAppStore();
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: capSummaries, refetch } = useQuery({
-    queryKey: ['leagueCap', currentLeague?.id],
+  // Use roster-based cap calculation (matches team page)
+  const { data: capSummaries, refetch: refetchCap } = useQuery({
+    queryKey: ['leagueCapDetailed', currentLeague?.id],
     queryFn: async () => {
       if (!currentLeague) return [];
-      const res = await getLeagueCapSummary(currentLeague.id);
+      const res = await getLeagueCapDetailed(currentLeague.id);
       return res.data.data;
     },
     enabled: !!currentLeague,
   });
 
+  const { data: draftPicks, refetch: refetchPicks } = useQuery({
+    queryKey: ['leagueDraftPicks', currentLeague?.id],
+    queryFn: async () => {
+      if (!currentLeague) return [];
+      const res = await getLeagueDraftPicks(currentLeague.id);
+      return res.data.data || [];
+    },
+    enabled: !!currentLeague,
+  });
+
+  // Helper to get pick value from settings
+  const getPickValue = (pick: any) => {
+    if (pick.pick_number) {
+      return settings.rookiePickValues[pick.pick_number] || 1;
+    }
+    // Estimate based on middle of round for future picks
+    const midPick = (pick.round - 1) * 12 + 6;
+    return settings.rookiePickValues[midPick] || 1;
+  };
+
+  // Calculate pick salary per team (only 2026 picks when in offseason mode)
+  const pickSalaryByTeam = useMemo(() => {
+    const salaryMap: Record<string, number> = {};
+    if (!draftPicks || !settings.isOffseason) return salaryMap;
+
+    const filteredPicks = draftPicks.filter(
+      (p: any) => p.round <= settings.rookieDraftRounds && p.season === 2026
+    );
+
+    filteredPicks.forEach((pick: any) => {
+      const teamId = pick.current_team_id;
+      if (!salaryMap[teamId]) salaryMap[teamId] = 0;
+      salaryMap[teamId] += getPickValue(pick);
+    });
+
+    return salaryMap;
+  }, [draftPicks, settings.rookieDraftRounds, settings.rookiePickValues, settings.isOffseason]);
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([refetchCap(), refetchPicks()]);
     setRefreshing(false);
   };
 
@@ -37,8 +76,25 @@ export default function LeagueScreen() {
     );
   }
 
-  // Sort by cap room (most to least)
-  const sortedTeams = [...(capSummaries || [])].sort((a, b) => (Number(b.cap_room) || 0) - (Number(a.cap_room) || 0));
+  // Calculate adjusted cap data including pick salaries
+  // The new endpoint returns roster_salary (matches team page calculation)
+  const teamsWithPickSalary = useMemo(() => {
+    return (capSummaries || []).map((team: any) => {
+      const pickSalary = pickSalaryByTeam[team.team_id] || 0;
+      // roster_salary comes from the new cap-detailed endpoint (same calculation as team page)
+      const adjustedTotalSalary = (Number(team.roster_salary) || 0) + pickSalary;
+      const adjustedCapRoom = (Number(team.cap_room) || 0) - pickSalary;
+      return {
+        ...team,
+        pick_salary: pickSalary,
+        adjusted_total_salary: adjustedTotalSalary,
+        adjusted_cap_room: adjustedCapRoom,
+      };
+    });
+  }, [capSummaries, pickSalaryByTeam]);
+
+  // Sort by adjusted cap room (most to least)
+  const sortedTeams = [...teamsWithPickSalary].sort((a, b) => a.adjusted_cap_room - b.adjusted_cap_room).reverse();
 
   return (
     <ScrollView
@@ -53,24 +109,29 @@ export default function LeagueScreen() {
         </Text>
       </View>
 
-      {/* League Stats */}
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{sortedTeams.length}</Text>
-          <Text style={styles.statLabel}>Teams</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>
-            ${sortedTeams.reduce((sum, t) => sum + (Number(t.total_salary) || 0), 0).toFixed(0)}
-          </Text>
-          <Text style={styles.statLabel}>Total Salary</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>
-            {sortedTeams.reduce((sum, t) => sum + (Number(t.active_contracts) || 0), 0)}
-          </Text>
-          <Text style={styles.statLabel}>Contracts</Text>
-        </View>
+      {/* Quick Actions */}
+      <View style={styles.actionsRow}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => router.push('/rules')}
+        >
+          <Ionicons name="document-text-outline" size={24} color={colors.primary} />
+          <Text style={styles.actionLabel}>Rules</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => router.push('/league-history')}
+        >
+          <Ionicons name="trophy-outline" size={24} color={colors.primary} />
+          <Text style={styles.actionLabel}>History</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => router.push('/buy-ins')}
+        >
+          <Ionicons name="cash-outline" size={24} color={colors.primary} />
+          <Text style={styles.actionLabel}>Buy-Ins</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Teams List */}
@@ -79,7 +140,7 @@ export default function LeagueScreen() {
         
         {sortedTeams.map((team, index) => {
           const isMyTeam = team.team_id === currentTeam?.id;
-          const capRoom = Number(team.cap_room) || 0;
+          const capRoom = team.adjusted_cap_room;
           const salaryCap = currentLeague.salary_cap || 1; // Prevent division by zero
           const capPercentUsed = Math.max(0, Math.min(100, ((salaryCap - capRoom) / salaryCap) * 100));
           const capColor = getCapStatusColor(capRoom, salaryCap);
@@ -121,10 +182,10 @@ export default function LeagueScreen() {
                     fontWeight: 'bold',
                     color: capColor
                   }}>
-                    ${capRoom.toFixed(2)}
+                    ${capRoom.toFixed(0)}
                   </Text>
                   <Text style={styles.capUsed}>
-                    ${(Number(team.total_salary) || 0).toFixed(2)} used
+                    ${team.adjusted_total_salary.toFixed(0)} used
                   </Text>
                   <Text style={styles.contractYears}>
                     {team.total_contract_years || 0} yrs
@@ -180,26 +241,24 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: spacing.xs,
   },
-  statsRow: {
+  actionsRow: {
     flexDirection: 'row',
     padding: spacing.md,
     gap: spacing.md,
   },
-  statCard: {
+  actionButton: {
     flex: 1,
     backgroundColor: colors.surface,
     padding: spacing.md,
     borderRadius: borderRadius.md,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  statValue: {
-    fontSize: fontSize.xl,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  statLabel: {
+  actionLabel: {
     fontSize: fontSize.sm,
-    color: colors.textMuted,
+    fontWeight: '500',
+    color: colors.text,
     marginTop: spacing.xs,
   },
   teamsSection: {

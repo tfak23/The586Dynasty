@@ -1,21 +1,26 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Modal, Switch } from 'react-native';
-import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Modal, Switch, ActivityIndicator } from 'react-native';
+import { useState, useEffect } from 'react';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
-import { initializeLeague, syncLeague, getTeams, getLeagueBySleeperId } from '@/lib/api';
+import { initializeLeague, syncLeague, syncRosters, syncPlayers, syncStats, getTeams, getLeagueBySleeperId, getLastSyncTime } from '@/lib/api';
 import { useAppStore, DEFAULT_ROOKIE_VALUES, SUGGESTED_4_ROUND_VALUES, SUGGESTED_5_ROUND_VALUES } from '@/lib/store';
 
 export default function SettingsScreen() {
   const queryClient = useQueryClient();
-  const { 
+  const {
     currentLeague, setCurrentLeague,
     currentTeam, setCurrentTeam,
     teams, setTeams,
     isCommissioner, setIsCommissioner,
     settings, setRookieDraftRounds, setRookiePickValue, resetPickValuesToSuggested, setIsOffseason,
-    reset 
+    toggleCommissionerTeam,
+    reset
   } = useAppStore();
+
+  // Check if current team is commissioner
+  const isCurrentTeamCommissioner = currentTeam && settings.commissionerTeamIds?.includes(currentTeam.id);
 
   const [sleeperLeagueId, setSleeperLeagueId] = useState('1315789488873553920'); // Default to The 586
   const [isConnecting, setIsConnecting] = useState(false);
@@ -23,6 +28,66 @@ export default function SettingsScreen() {
   const [showPickValuesModal, setShowPickValuesModal] = useState(false);
   const [editingPick, setEditingPick] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState('');
+
+  // Fetch last sync time
+  const { data: syncData, refetch: refetchSyncTime } = useQuery({
+    queryKey: ['lastSyncTime', currentLeague?.id],
+    queryFn: async () => {
+      if (!currentLeague?.id) return null;
+      const res = await getLastSyncTime(currentLeague.id);
+      return res.data.data;
+    },
+    enabled: !!currentLeague?.id,
+    refetchInterval: 60000, // Refresh every minute
+  });
+
+  // Roster sync mutation (quick sync)
+  const rosterSyncMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentLeague) throw new Error('No league connected');
+      return syncRosters(currentLeague.id);
+    },
+    onSuccess: () => {
+      Alert.alert('Success', 'Rosters synced with Sleeper!');
+      refetchSyncTime();
+      queryClient.invalidateQueries();
+    },
+    onError: (error: any) => {
+      Alert.alert('Error', error.message || 'Failed to sync rosters');
+    },
+  });
+
+  // Player database sync mutation
+  const playerSyncMutation = useMutation({
+    mutationFn: async () => {
+      return syncPlayers();
+    },
+    onSuccess: (res) => {
+      const data = res.data.data;
+      Alert.alert('Success', `Player database synced!\n${data.synced} players synced, ${data.skipped} skipped.`);
+      queryClient.invalidateQueries();
+    },
+    onError: (error: any) => {
+      Alert.alert('Error', error.message || 'Failed to sync player database');
+    },
+  });
+
+  // Stats sync mutation - uses league-specific scoring settings
+  const statsSyncMutation = useMutation({
+    mutationFn: async () => {
+      // Pass league ID to use league's scoring settings from Sleeper
+      return syncStats(2025, currentLeague?.id);
+    },
+    onSuccess: (res) => {
+      const data = res.data.data;
+      const scoringInfo = data.scoringType ? `\nScoring: ${data.scoringType}` : '';
+      Alert.alert('Success', `2025 stats synced!\n${data.synced} players updated.${scoringInfo}`);
+      queryClient.invalidateQueries();
+    },
+    onError: (error: any) => {
+      Alert.alert('Error', error.message || 'Failed to sync stats');
+    },
+  });
 
   const initializeMutation = useMutation({
     mutationFn: async (sleeperId: string) => {
@@ -177,6 +242,100 @@ export default function SettingsScreen() {
         )}
       </View>
 
+      {/* Automatic Sync Status */}
+      {currentLeague && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Sleeper Sync</Text>
+          <View style={styles.card}>
+            <View style={styles.syncStatusRow}>
+              <View style={styles.syncStatusInfo}>
+                <View style={styles.syncStatusHeader}>
+                  <Ionicons
+                    name={syncData?.minutes_ago !== null && syncData?.minutes_ago < 10 ? "checkmark-circle" : "time-outline"}
+                    size={20}
+                    color={syncData?.minutes_ago !== null && syncData?.minutes_ago < 10 ? colors.success : colors.warning}
+                  />
+                  <Text style={styles.syncStatusLabel}>Auto-Sync Status</Text>
+                </View>
+                <Text style={styles.syncStatusText}>
+                  {syncData?.last_sync
+                    ? syncData.minutes_ago !== null && syncData.minutes_ago < 1
+                      ? 'Just now'
+                      : syncData.minutes_ago !== null && syncData.minutes_ago < 60
+                        ? `${Math.round(syncData.minutes_ago)} minutes ago`
+                        : `${new Date(syncData.last_sync).toLocaleString()}`
+                    : 'Never synced'}
+                </Text>
+                <Text style={styles.syncHint}>
+                  Rosters sync automatically every 5 minutes
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.syncButtonRow}>
+              <TouchableOpacity
+                style={rosterSyncMutation.isPending ? styles.syncButtonDisabled : styles.syncButton}
+                onPress={() => rosterSyncMutation.mutate()}
+                disabled={rosterSyncMutation.isPending}
+              >
+                {rosterSyncMutation.isPending ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Ionicons name="refresh" size={18} color={colors.white} />
+                )}
+                <Text style={styles.syncButtonText}>
+                  {rosterSyncMutation.isPending ? 'Syncing...' : 'Sync Now'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.syncNote}>
+              When players are dropped on Sleeper, dead cap is automatically applied.
+            </Text>
+
+            {/* Player Database & Stats Sync */}
+            <View style={styles.advancedSyncSection}>
+              <Text style={styles.advancedSyncTitle}>Free Agent Database</Text>
+              <Text style={styles.advancedSyncHint}>
+                Sync NFL player database and stats to enable free agent browsing and contract estimation.
+              </Text>
+
+              <View style={styles.advancedSyncButtons}>
+                <TouchableOpacity
+                  style={playerSyncMutation.isPending ? styles.smallSyncButtonDisabled : styles.smallSyncButton}
+                  onPress={() => playerSyncMutation.mutate()}
+                  disabled={playerSyncMutation.isPending}
+                >
+                  {playerSyncMutation.isPending ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Ionicons name="people-outline" size={16} color={colors.primary} />
+                  )}
+                  <Text style={styles.smallSyncButtonText}>
+                    {playerSyncMutation.isPending ? 'Syncing...' : 'Sync Players'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={statsSyncMutation.isPending ? styles.smallSyncButtonDisabled : styles.smallSyncButton}
+                  onPress={() => statsSyncMutation.mutate()}
+                  disabled={statsSyncMutation.isPending}
+                >
+                  {statsSyncMutation.isPending ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Ionicons name="stats-chart-outline" size={16} color={colors.primary} />
+                  )}
+                  <Text style={styles.smallSyncButtonText}>
+                    {statsSyncMutation.isPending ? 'Syncing...' : 'Sync 2025 Stats'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
+
       {/* Team Selection */}
       {currentLeague && teams.length > 0 && (
         <View style={styles.section}>
@@ -197,6 +356,51 @@ export default function SettingsScreen() {
                 )}
               </TouchableOpacity>
             ))}
+          </View>
+        </View>
+      )}
+
+      {/* Commissioner Settings */}
+      {currentLeague && teams.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Commissioner Settings</Text>
+          <View style={styles.card}>
+            <Text style={styles.commissionerHint}>
+              Select which teams have commissioner access to manage league settings, trades, and rosters.
+            </Text>
+            {teams.map((team) => {
+              const isCommissionerTeam = settings.commissionerTeamIds?.includes(team.id) || false;
+              return (
+                <TouchableOpacity
+                  key={team.id}
+                  style={styles.commissionerRow}
+                  onPress={() => toggleCommissionerTeam(team.id)}
+                >
+                  <View style={styles.teamInfo}>
+                    <Text style={styles.teamName}>{team.team_name}</Text>
+                    <Text style={styles.ownerName}>{team.owner_name}</Text>
+                  </View>
+                  <Switch
+                    value={isCommissionerTeam}
+                    onValueChange={() => toggleCommissionerTeam(team.id)}
+                    trackColor={{ false: colors.border, true: colors.warning }}
+                    thumbColor={colors.white}
+                  />
+                </TouchableOpacity>
+              );
+            })}
+
+            {/* Commissioner Tools Button */}
+            {isCurrentTeamCommissioner && (
+              <TouchableOpacity
+                style={styles.commissionerToolsButton}
+                onPress={() => router.push('/commissioner')}
+              >
+                <Ionicons name="shield-outline" size={20} color={colors.white} />
+                <Text style={styles.commissionerToolsText}>Commissioner Tools</Text>
+                <Ionicons name="chevron-forward" size={20} color={colors.white} />
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       )}
@@ -275,6 +479,8 @@ export default function SettingsScreen() {
                 style={settings.rookieDraftRounds === rounds ? styles.optionSelected : styles.option}
                 onPress={() => {
                   setRookieDraftRounds(rounds);
+                  // Auto-reset pick values when changing rounds
+                  resetPickValuesToSuggested(rounds);
                   setShowRoundsModal(false);
                 }}
               >
@@ -779,5 +985,152 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: '600',
     marginLeft: spacing.sm,
+  },
+  // Sync status styles
+  syncStatusRow: {
+    marginBottom: spacing.md,
+  },
+  syncStatusInfo: {
+    flex: 1,
+  },
+  syncStatusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  syncStatusLabel: {
+    fontSize: fontSize.base,
+    fontWeight: '600',
+    color: colors.text,
+    marginLeft: spacing.sm,
+  },
+  syncStatusText: {
+    fontSize: fontSize.md,
+    color: colors.textSecondary,
+    marginLeft: spacing.lg + spacing.sm,
+  },
+  syncHint: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+    marginLeft: spacing.lg + spacing.sm,
+  },
+  syncButtonRow: {
+    marginTop: spacing.sm,
+  },
+  syncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+  },
+  syncButtonDisabled: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    opacity: 0.6,
+  },
+  syncButtonText: {
+    color: colors.white,
+    fontWeight: '600',
+    fontSize: fontSize.md,
+    marginLeft: spacing.sm,
+  },
+  syncNote: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.md,
+    fontStyle: 'italic',
+  },
+  advancedSyncSection: {
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  advancedSyncTitle: {
+    fontSize: fontSize.base,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  advancedSyncHint: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    marginBottom: spacing.md,
+  },
+  advancedSyncButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  smallSyncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    flex: 1,
+    marginHorizontal: spacing.xs,
+  },
+  smallSyncButtonDisabled: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    flex: 1,
+    marginHorizontal: spacing.xs,
+    opacity: 0.6,
+  },
+  smallSyncButtonText: {
+    color: colors.primary,
+    fontWeight: '600',
+    fontSize: fontSize.sm,
+    marginLeft: spacing.xs,
+  },
+  // Commissioner styles
+  commissionerHint: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    marginBottom: spacing.md,
+    lineHeight: 20,
+  },
+  commissionerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  commissionerToolsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.warning,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.md,
+    gap: spacing.sm,
+  },
+  commissionerToolsText: {
+    color: colors.white,
+    fontWeight: '600',
+    fontSize: fontSize.md,
+    flex: 1,
   },
 });
