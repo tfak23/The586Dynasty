@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { query, queryOne, execute } from '../db/index.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { SleeperService } from '../services/sleeper.js';
+import { syncPlayerStats } from '../services/statsSync.js';
+import { getLastSyncTime } from '../jobs/syncRosters.js';
 
 export const syncRoutes = Router();
 
@@ -338,14 +340,58 @@ syncRoutes.post('/initialize', async (req, res, next) => {
 // Get sync history
 syncRoutes.get('/league/:leagueId/history', async (req, res, next) => {
   try {
+    const { limit = 20 } = req.query;
     const history = await query(
-      `SELECT * FROM sync_log WHERE league_id = $1 ORDER BY started_at DESC LIMIT 20`,
-      [req.params.leagueId]
+      `SELECT * FROM sync_log WHERE league_id = $1 ORDER BY started_at DESC LIMIT $2`,
+      [req.params.leagueId, limit]
     );
-    
+
     res.json({
       status: 'success',
       data: history,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get last sync time for a league
+syncRoutes.get('/league/:leagueId/last-sync', async (req, res, next) => {
+  try {
+    const lastSync = await getLastSyncTime(req.params.leagueId);
+
+    res.json({
+      status: 'success',
+      data: {
+        last_sync: lastSync,
+        minutes_ago: lastSync ? Math.round((Date.now() - new Date(lastSync).getTime()) / 60000) : null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Manually trigger player stats sync
+// Optional: pass league_id in body to use league-specific scoring settings
+syncRoutes.post('/stats/:season', async (req, res, next) => {
+  try {
+    const season = parseInt(req.params.season);
+    const { league_id } = req.body;
+
+    if (isNaN(season) || season < 2020 || season > 2030) {
+      throw new AppError('Invalid season. Must be between 2020 and 2030.', 400);
+    }
+
+    console.log(`📊 Manual stats sync triggered for ${season}${league_id ? ` with league ${league_id}` : ''}...`);
+    const result = await syncPlayerStats(season, league_id);
+
+    res.json({
+      status: 'success',
+      data: {
+        season,
+        ...result,
+      },
     });
   } catch (error) {
     next(error);

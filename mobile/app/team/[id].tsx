@@ -1,9 +1,10 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Modal } from 'react-native';
+import { useState } from 'react';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, borderRadius, positionColors, getCapStatusColor } from '@/lib/theme';
-import { getTeamRoster, getTeamCapSummary, getTeamDraftPicks, getTeam } from '@/lib/api';
+import { getTeamRoster, getTeamCapSummary, getTeamDraftPicks, getTeam, getTeamDeadCapBreakdown } from '@/lib/api';
 import { useAppStore } from '@/lib/store';
 
 type Position = 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DEF';
@@ -25,6 +26,7 @@ const formatPickDisplay = (pick: any) => {
 export default function TeamDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { settings } = useAppStore();
+  const [showDeadCapModal, setShowDeadCapModal] = useState(false);
 
   // Get pick value from settings
   const getPickValue = (pick: any) => {
@@ -72,6 +74,15 @@ export default function TeamDetailScreen() {
     enabled: !!id,
   });
 
+  const { data: deadCapBreakdown } = useQuery({
+    queryKey: ['deadCapBreakdown', id],
+    queryFn: async () => {
+      const res = await getTeamDeadCapBreakdown(id);
+      return res.data.data;
+    },
+    enabled: !!id && showDeadCapModal,
+  });
+
   if (rosterLoading || capLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -82,7 +93,8 @@ export default function TeamDetailScreen() {
 
   // roster is an array of contracts directly
   const contracts = Array.isArray(roster) ? roster : [];
-  const salaryCap = capSummary?.salary_cap || 500;
+  // PostgreSQL returns numeric values as strings, so we need to parse them
+  const salaryCap = capSummary?.salary_cap ? parseFloat(String(capSummary.salary_cap)) : 500;
 
   // Filter picks based on settings
   const filteredPicks = (draftPicks || []).filter((p: any) => p.round <= settings.rookieDraftRounds);
@@ -160,12 +172,21 @@ export default function TeamDetailScreen() {
             <Text style={styles.capLabel}>Used</Text>
             <Text style={styles.capValue}>${totalSalary.toFixed(0)}</Text>
           </View>
-          <View style={styles.capItem}>
+          <TouchableOpacity
+            style={styles.capItem}
+            onPress={() => deadMoney > 0 && setShowDeadCapModal(true)}
+            disabled={deadMoney === 0}
+          >
             <Text style={styles.capLabel}>Dead Money</Text>
-            <Text style={deadMoney > 0 ? { fontSize: fontSize.md, fontWeight: '600', color: colors.error } : styles.capValue}>
-              ${deadMoney.toFixed(0)}
-            </Text>
-          </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={deadMoney > 0 ? { fontSize: fontSize.md, fontWeight: '600', color: colors.error } : styles.capValue}>
+                ${deadMoney.toFixed(0)}
+              </Text>
+              {deadMoney > 0 && (
+                <Ionicons name="information-circle-outline" size={14} color={colors.error} style={{ marginLeft: 4 }} />
+              )}
+            </View>
+          </TouchableOpacity>
           <View style={styles.capItem}>
             <Text style={styles.capLabel}>Contracts</Text>
             <Text style={styles.capValue}>{contractCount}</Text>
@@ -271,6 +292,82 @@ export default function TeamDetailScreen() {
       )}
 
       <View style={{ height: 50 }} />
+
+      {/* Dead Cap Breakdown Modal */}
+      <Modal
+        visible={showDeadCapModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeadCapModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowDeadCapModal(false)}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Dead Cap Breakdown</Text>
+              <TouchableOpacity onPress={() => setShowDeadCapModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalTotalRow}>
+              <Text style={styles.modalTotalLabel}>Total Dead Cap</Text>
+              <Text style={styles.modalTotalValue}>${deadCapBreakdown?.total_dead_cap?.toFixed(0) || deadMoney.toFixed(0)}</Text>
+            </View>
+
+            {/* Player Releases Section */}
+            {deadCapBreakdown?.releases && deadCapBreakdown.releases.items.length > 0 && (
+              <View style={styles.modalSection}>
+                <View style={styles.modalSectionHeader}>
+                  <Ionicons name="document-text-outline" size={16} color={colors.textSecondary} />
+                  <Text style={styles.modalSectionTitle}>Player Releases</Text>
+                  <Text style={styles.modalSectionTotal}>${deadCapBreakdown.releases.total.toFixed(0)}</Text>
+                </View>
+                {deadCapBreakdown.releases.items.map((item: any, index: number) => (
+                  <View key={`release-${index}`} style={styles.modalItem}>
+                    <View style={styles.modalItemInfo}>
+                      <Text style={styles.modalItemName}>{item.player_name}</Text>
+                      {item.position && (
+                        <Text style={styles.modalItemPosition}>{item.position}</Text>
+                      )}
+                    </View>
+                    <Text style={styles.modalItemAmount}>${item.amount.toFixed(0)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Trade Dead Money Section */}
+            {deadCapBreakdown?.trades && deadCapBreakdown.trades.items.length > 0 && (
+              <View style={styles.modalSection}>
+                <View style={styles.modalSectionHeader}>
+                  <Ionicons name="swap-horizontal" size={16} color={colors.textSecondary} />
+                  <Text style={styles.modalSectionTitle}>Trade Dead Money</Text>
+                  <Text style={styles.modalSectionTotal}>${deadCapBreakdown.trades.total.toFixed(0)}</Text>
+                </View>
+                {deadCapBreakdown.trades.items.map((item: any, index: number) => (
+                  <View key={`trade-${index}`} style={styles.modalItem}>
+                    <View style={styles.modalItemInfo}>
+                      <Text style={styles.modalItemName}>{item.reason || 'Trade dead money'}</Text>
+                    </View>
+                    <Text style={styles.modalItemAmount}>${item.amount.toFixed(0)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* No dead cap message */}
+            {(!deadCapBreakdown ||
+              ((!deadCapBreakdown.releases || deadCapBreakdown.releases.items.length === 0) &&
+               (!deadCapBreakdown.trades || deadCapBreakdown.trades.items.length === 0))) && (
+              <Text style={styles.noDeadCapText}>No dead cap breakdown available</Text>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ScrollView>
   );
 }
@@ -480,5 +577,111 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.textMuted,
     marginTop: spacing.xs,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  modalContent: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: 'bold',
+    color: colors.text,
+  },
+  modalTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.backgroundSecondary,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.md,
+  },
+  modalTotalLabel: {
+    fontSize: fontSize.md,
+    color: colors.textSecondary,
+  },
+  modalTotalValue: {
+    fontSize: fontSize.lg,
+    fontWeight: 'bold',
+    color: colors.error,
+  },
+  modalSection: {
+    marginBottom: spacing.md,
+  },
+  modalSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    gap: spacing.xs,
+  },
+  modalSectionTitle: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  modalSectionTotal: {
+    fontSize: fontSize.sm,
+    fontWeight: 'bold',
+    color: colors.error,
+  },
+  modalItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.sm,
+    marginBottom: spacing.xs,
+  },
+  modalItemInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  modalItemName: {
+    fontSize: fontSize.md,
+    color: colors.text,
+  },
+  modalItemPosition: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    backgroundColor: colors.backgroundSecondary,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+    borderRadius: borderRadius.xs,
+  },
+  modalItemAmount: {
+    fontSize: fontSize.md,
+    fontWeight: '600',
+    color: colors.error,
+  },
+  noDeadCapText: {
+    fontSize: fontSize.md,
+    color: colors.textMuted,
+    textAlign: 'center',
+    paddingVertical: spacing.lg,
   },
 });

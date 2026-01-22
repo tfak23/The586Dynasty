@@ -74,11 +74,108 @@ teamRoutes.get('/league/:leagueId/cap', async (req, res, next) => {
        ORDER BY tcs.cap_room DESC`,
       [req.params.leagueId]
     );
-    
+
     res.json({
       status: 'success',
       data: summaries,
     } as ApiResponse<TeamCapSummary[]>);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get detailed cap info for all teams (roster-based calculation to match team page)
+teamRoutes.get('/league/:leagueId/cap-detailed', async (req, res, next) => {
+  try {
+    const league = await queryOne('SELECT * FROM leagues WHERE id = $1', [req.params.leagueId]);
+    if (!league) {
+      throw new AppError('League not found', 404);
+    }
+
+    const teams = await query('SELECT * FROM teams WHERE league_id = $1', [req.params.leagueId]);
+    const currentSeason = league.current_season;
+
+    const results = [];
+    for (const team of teams) {
+      // Get roster contracts (same as /teams/:id/roster - no season filtering)
+      // This matches how the team page calculates player salary
+      const contracts = await query(
+        `SELECT c.*, p.full_name, p.position
+         FROM contracts c
+         JOIN players p ON c.player_id = p.id
+         WHERE c.team_id = $1 AND c.status = 'active'`,
+        [team.id]
+      );
+
+      // Sum roster salary (same as team page)
+      const rosterSalary = contracts.reduce((sum: number, c: any) => sum + parseFloat(c.salary || 0), 0);
+
+      // Get dead money from cap_adjustments for current season
+      const yearColumn = `amount_${currentSeason}`;
+      const deadMoneyResult = await queryOne(
+        `SELECT COALESCE(SUM(${yearColumn}), 0) as total
+         FROM cap_adjustments WHERE team_id = $1`,
+        [team.id]
+      );
+      const deadMoney = parseFloat(deadMoneyResult?.total || 0);
+
+      // Also get dead money from cap_transactions (player releases)
+      const releaseDeadMoney = await queryOne(
+        `SELECT COALESCE(SUM(amount), 0) as total
+         FROM cap_transactions
+         WHERE team_id = $1 AND season = $2 AND transaction_type = 'dead_money'`,
+        [team.id, currentSeason]
+      );
+      const totalDeadMoney = deadMoney + parseFloat(releaseDeadMoney?.total || 0);
+
+      const capRoom = league.salary_cap - rosterSalary - totalDeadMoney;
+
+      results.push({
+        team_id: team.id,
+        team_name: team.team_name,
+        owner_name: team.owner_name,
+        salary_cap: league.salary_cap,
+        roster_salary: rosterSalary,
+        dead_money: totalDeadMoney,
+        cap_room: capRoom,
+        contract_count: contracts.length,
+        total_contract_years: contracts.reduce((sum: number, c: any) => sum + (c.years_remaining || 0), 0),
+      });
+    }
+
+    // Sort by cap room descending (same as original endpoint)
+    results.sort((a, b) => b.cap_room - a.cap_room);
+
+    res.json({
+      status: 'success',
+      data: results,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get all draft picks for a league
+teamRoutes.get('/league/:leagueId/draft-picks', async (req, res, next) => {
+  try {
+    const picks = await query(
+      `SELECT
+        dp.*,
+        ot.team_name as original_team_name,
+        ct.team_name as current_team_name
+       FROM draft_picks dp
+       JOIN teams t ON dp.original_team_id = t.id
+       LEFT JOIN teams ot ON dp.original_team_id = ot.id
+       LEFT JOIN teams ct ON dp.current_team_id = ct.id
+       WHERE t.league_id = $1 AND dp.is_used = false
+       ORDER BY dp.season, dp.round, dp.pick_number`,
+      [req.params.leagueId]
+    );
+
+    res.json({
+      status: 'success',
+      data: picks,
+    });
   } catch (error) {
     next(error);
   }
@@ -303,15 +400,101 @@ teamRoutes.get('/:id/cap-adjustments', async (req, res, next) => {
   }
 });
 
+// Get team dead cap breakdown (sources of dead money)
+teamRoutes.get('/:id/dead-cap-breakdown', async (req, res, next) => {
+  try {
+    const team = await queryOne<Team>('SELECT * FROM teams WHERE id = $1', [req.params.id]);
+    if (!team) {
+      throw new AppError('Team not found', 404);
+    }
+
+    const league = await queryOne('SELECT * FROM leagues WHERE id = $1', [team.league_id]);
+    if (!league) {
+      throw new AppError('League not found', 404);
+    }
+
+    const currentSeason = league.current_season;
+    const yearColumn = `amount_${currentSeason}`;
+
+    // Get dead money from player releases (cap_transactions)
+    const releaseDeadMoney = await query(
+      `SELECT
+        ct.amount,
+        ct.reason,
+        ct.created_at,
+        p.full_name as player_name,
+        p.position
+       FROM cap_transactions ct
+       LEFT JOIN players p ON ct.player_id = p.id
+       WHERE ct.team_id = $1 AND ct.season = $2 AND ct.transaction_type = 'dead_money'
+       ORDER BY ct.created_at DESC`,
+      [req.params.id, currentSeason]
+    );
+
+    // Get dead money from trades (cap_adjustments)
+    const tradeDeadMoney = await query(
+      `SELECT
+        ca.${yearColumn} as amount,
+        ca.reason,
+        ca.created_at,
+        ca.trade_id
+       FROM cap_adjustments ca
+       WHERE ca.team_id = $1 AND ca.${yearColumn} > 0
+       ORDER BY ca.created_at DESC`,
+      [req.params.id]
+    );
+
+    // Format the results
+    const releases = releaseDeadMoney.map((r: any) => ({
+      type: 'release',
+      player_name: r.player_name || 'Unknown Player',
+      position: r.position,
+      amount: parseFloat(r.amount),
+      reason: r.reason,
+      date: r.created_at,
+    }));
+
+    const trades = tradeDeadMoney.map((t: any) => ({
+      type: 'trade',
+      amount: parseFloat(t.amount),
+      reason: t.reason || 'Trade dead money',
+      trade_id: t.trade_id,
+      date: t.created_at,
+    }));
+
+    // Calculate totals
+    const releaseTotal = releases.reduce((sum: number, r: any) => sum + r.amount, 0);
+    const tradeTotal = trades.reduce((sum: number, t: any) => sum + t.amount, 0);
+
+    res.json({
+      status: 'success',
+      data: {
+        season: currentSeason,
+        total_dead_cap: releaseTotal + tradeTotal,
+        releases: {
+          total: releaseTotal,
+          items: releases,
+        },
+        trades: {
+          total: tradeTotal,
+          items: trades,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Update team
 teamRoutes.patch('/:id', async (req, res, next) => {
   try {
     const allowedFields = ['team_name', 'owner_name', 'division'];
-    
+
     const updates: string[] = [];
     const values: any[] = [];
     let paramIndex = 1;
-    
+
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         updates.push(`${field} = $${paramIndex}`);
@@ -319,26 +502,97 @@ teamRoutes.patch('/:id', async (req, res, next) => {
         paramIndex++;
       }
     }
-    
+
     if (updates.length === 0) {
       throw new AppError('No valid fields to update', 400);
     }
-    
+
     values.push(req.params.id);
-    
+
     const team = await queryOne<Team>(
       `UPDATE teams SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
       values
     );
-    
+
     if (!team) {
       throw new AppError('Team not found', 404);
     }
-    
+
     res.json({
       status: 'success',
       data: team,
     } as ApiResponse<Team>);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create cap adjustment (commissioner only)
+// This adds/removes dead cap for a team across multiple years
+teamRoutes.post('/:id/cap-adjustment', async (req, res, next) => {
+  try {
+    const teamId = req.params.id;
+    const {
+      reason,
+      amount_2026 = 0,
+      amount_2027 = 0,
+      amount_2028 = 0,
+      amount_2029 = 0,
+      amount_2030 = 0,
+      trade_id
+    } = req.body;
+
+    if (!reason) {
+      throw new AppError('reason is required', 400);
+    }
+
+    // Validate at least one year has an amount
+    const totalAmount = amount_2026 + amount_2027 + amount_2028 + amount_2029 + amount_2030;
+    if (totalAmount === 0) {
+      throw new AppError('At least one year must have a non-zero amount', 400);
+    }
+
+    // Verify team exists
+    const team = await queryOne<Team>('SELECT * FROM teams WHERE id = $1', [teamId]);
+    if (!team) {
+      throw new AppError('Team not found', 404);
+    }
+
+    // Insert cap adjustment
+    const adjustment = await queryOne(
+      `INSERT INTO cap_adjustments (team_id, reason, amount_2026, amount_2027, amount_2028, amount_2029, amount_2030, trade_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [teamId, reason, amount_2026, amount_2027, amount_2028, amount_2029, amount_2030, trade_id]
+    );
+
+    res.status(201).json({
+      status: 'success',
+      data: adjustment,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete cap adjustment (commissioner only)
+teamRoutes.delete('/:id/cap-adjustment/:adjustmentId', async (req, res, next) => {
+  try {
+    const { id: teamId, adjustmentId } = req.params;
+
+    const result = await queryOne(
+      'DELETE FROM cap_adjustments WHERE id = $1 AND team_id = $2 RETURNING *',
+      [adjustmentId, teamId]
+    );
+
+    if (!result) {
+      throw new AppError('Cap adjustment not found', 404);
+    }
+
+    res.json({
+      status: 'success',
+      data: { deleted: true, id: adjustmentId },
+    });
   } catch (error) {
     next(error);
   }

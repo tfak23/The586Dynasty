@@ -180,6 +180,7 @@ export interface CSVImportRow {
   '2027': string;
   '2028': string;
   '2029': string;
+  '2030': string;
   Owner: string;
   'Roster Status': string;
 }

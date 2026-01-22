@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, queryOne, execute } from '../db/index.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { evaluateContract, getLeagueContractRankings } from '../services/contractEvaluator.js';
 import type { Contract, ApiResponse } from '../types/index.js';
 
 export const contractRoutes = Router();
@@ -32,6 +33,131 @@ const DEAD_CAP_PERCENTAGES: Record<number, number[]> = {
   2: [0.50, 0.25],
   1: [0.50],
 };
+
+// Evaluate a contract against market value
+// Returns rating: BUST, GOOD, STEAL, or LEGENDARY
+// IMPORTANT: This route must be defined before /:id to avoid route conflicts
+contractRoutes.get('/:contractId/evaluation/:leagueId', async (req, res, next) => {
+  try {
+    const { contractId, leagueId } = req.params;
+
+    if (!contractId || !leagueId) {
+      throw new AppError('contractId and leagueId are required', 400);
+    }
+
+    const evaluation = await evaluateContract(contractId, leagueId);
+
+    res.json({
+      status: 'success',
+      data: evaluation,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get all signed contracts with evaluation ratings
+// Used by the Players tab to show all signed players with their contract ratings
+contractRoutes.get('/league/:leagueId/with-evaluations', async (req, res, next) => {
+  try {
+    const { leagueId } = req.params;
+    const { position, rating } = req.query;
+
+    // Get all active contracts with player info
+    let sql = `
+      SELECT c.*, p.full_name, p.position, p.team as nfl_team, p.age, p.sleeper_player_id,
+             t.team_name, t.owner_name
+      FROM contracts c
+      JOIN players p ON c.player_id = p.id
+      LEFT JOIN teams t ON c.team_id = t.id
+      WHERE c.league_id = $1 AND c.status = 'active'
+    `;
+    const params: any[] = [leagueId];
+    let paramIndex = 2;
+
+    if (position && position !== 'All') {
+      sql += ` AND p.position = $${paramIndex}`;
+      params.push(position);
+      paramIndex++;
+    }
+
+    sql += ' ORDER BY c.salary DESC';
+
+    const contracts = await query(sql, params);
+
+    // Get league rankings for all contracts (for evaluation data)
+    const rankings = await getLeagueContractRankings(leagueId);
+
+    // Get player stats for PPG check and rookie detection
+    const playerStats = await query(`
+      SELECT player_id, avg_points_per_game
+      FROM player_season_stats
+      WHERE season = 2025
+    `);
+    const statsMap = new Map(playerStats.map((s: any) => [s.player_id, parseFloat(s.avg_points_per_game)]));
+
+    // Get count of stats records per player to detect rookies (no historical stats)
+    const playerStatsCounts = await query(`
+      SELECT player_id, COUNT(*) as stat_count
+      FROM player_season_stats
+      GROUP BY player_id
+    `);
+    const statsCountMap = new Map(playerStatsCounts.map((s: any) => [s.player_id, parseInt(s.stat_count)]));
+
+    // Attach evaluation data to each contract
+    const contractsWithEval = contracts.map((c: any) => {
+      const ranking = rankings.find(r => r.contractId === c.id);
+      const hasAnyStats = statsCountMap.get(c.player_id) || 0;
+
+      // Check if rookie (no stats history at all)
+      if (hasAnyStats === 0) {
+        return {
+          ...c,
+          evaluation: {
+            rating: 'ROOKIE',
+            value_score: 0,
+            rank: null,
+          },
+        };
+      }
+
+      // Calculate rating from valueScore
+      let contractRating: string = 'GOOD';
+      if (ranking) {
+        if (ranking.valueScore < -25) contractRating = 'BUST';
+        else if (ranking.valueScore >= 25) contractRating = 'STEAL';
+
+        // Check for LEGENDARY: top 10 rank + 50% value score
+        // BUT disqualify players with PPG < 10
+        if (ranking.valueScore >= 50 && ranking.rank <= 10) {
+          const playerPpg = statsMap.get(c.player_id);
+          const isDisqualifiedByLowPPG = playerPpg !== undefined && playerPpg < 10;
+          if (!isDisqualifiedByLowPPG) {
+            contractRating = 'LEGENDARY';
+          }
+        }
+      }
+      return {
+        ...c,
+        evaluation: ranking ? {
+          rating: contractRating,
+          value_score: Math.round(ranking.valueScore),
+          rank: ranking.rank,
+        } : null,
+      };
+    });
+
+    // Filter by rating if specified
+    let result = contractsWithEval;
+    if (rating && rating !== 'ALL') {
+      result = contractsWithEval.filter((c: any) => c.evaluation?.rating === rating);
+    }
+
+    res.json({ status: 'success', data: result });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Get all contracts for a league
 contractRoutes.get('/league/:leagueId', async (req, res, next) => {
@@ -419,3 +545,4 @@ contractRoutes.get('/minimum-salaries/all', async (req, res, next) => {
     next(error);
   }
 });
+

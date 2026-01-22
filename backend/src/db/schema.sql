@@ -242,7 +242,8 @@ CREATE TABLE trade_assets (
     
     -- Cap Space (if asset_type = 'cap_space')
     cap_amount DECIMAL(10,2),
-    
+    cap_year INT DEFAULT 2026 CHECK (cap_year >= 2026 AND cap_year <= 2030),
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

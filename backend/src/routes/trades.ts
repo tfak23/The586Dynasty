@@ -197,10 +197,10 @@ tradeRoutes.post('/', async (req, res, next) => {
     // Add trade assets
     for (const asset of assets) {
       await execute(
-        `INSERT INTO trade_assets (trade_id, from_team_id, to_team_id, asset_type, contract_id, draft_pick_id, cap_amount)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [trade?.id, asset.from_team_id, asset.to_team_id, asset.asset_type, 
-         asset.contract_id, asset.draft_pick_id, asset.cap_amount]
+        `INSERT INTO trade_assets (trade_id, from_team_id, to_team_id, asset_type, contract_id, draft_pick_id, cap_amount, cap_year)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [trade?.id, asset.from_team_id, asset.to_team_id, asset.asset_type,
+         asset.contract_id, asset.draft_pick_id, asset.cap_amount, asset.cap_year || 2026]
       );
     }
     
@@ -499,6 +499,63 @@ async function executeTrade(tradeId: string): Promise<void> {
         `UPDATE draft_picks SET current_team_id = $1 WHERE id = $2`,
         [asset.to_team_id, asset.draft_pick_id]
       );
+    } else if (asset.asset_type === 'cap_space' && asset.cap_amount) {
+      // Cap space trade: from_team takes on cap hit, to_team gets cap relief
+      const capAmount = parseFloat(asset.cap_amount);
+      const capYear = asset.cap_year || 2026; // Default to 2026 if not specified
+
+      // Build year-specific amounts
+      const yearAmounts = {
+        amount_2026: capYear === 2026 ? capAmount : 0,
+        amount_2027: capYear === 2027 ? capAmount : 0,
+        amount_2028: capYear === 2028 ? capAmount : 0,
+        amount_2029: capYear === 2029 ? capAmount : 0,
+        amount_2030: capYear === 2030 ? capAmount : 0,
+      };
+
+      // Get team names for description
+      const fromTeam = await queryOne('SELECT team_name, owner_name FROM teams WHERE id = $1', [asset.from_team_id]);
+      const toTeam = await queryOne('SELECT team_name, owner_name FROM teams WHERE id = $1', [asset.to_team_id]);
+
+      // Create cap hit for the from_team (they're absorbing cap)
+      await execute(
+        `INSERT INTO cap_adjustments (
+          team_id, league_id, adjustment_type, description, trade_id,
+          amount_2026, amount_2027, amount_2028, amount_2029, amount_2030
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          asset.from_team_id,
+          trade?.league_id,
+          'trade_cap_hit',
+          `Cap absorbed in trade with ${toTeam?.owner_name || toTeam?.team_name}`,
+          tradeId,
+          yearAmounts.amount_2026,
+          yearAmounts.amount_2027,
+          yearAmounts.amount_2028,
+          yearAmounts.amount_2029,
+          yearAmounts.amount_2030,
+        ]
+      );
+
+      // Create cap credit for the to_team (they're receiving cap relief)
+      await execute(
+        `INSERT INTO cap_adjustments (
+          team_id, league_id, adjustment_type, description, trade_id,
+          amount_2026, amount_2027, amount_2028, amount_2029, amount_2030
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          asset.to_team_id,
+          trade?.league_id,
+          'trade_cap_credit',
+          `Cap relief in trade from ${fromTeam?.owner_name || fromTeam?.team_name}`,
+          tradeId,
+          -yearAmounts.amount_2026, // Negative for credit
+          -yearAmounts.amount_2027,
+          -yearAmounts.amount_2028,
+          -yearAmounts.amount_2029,
+          -yearAmounts.amount_2030,
+        ]
+      );
     }
   }
   
@@ -564,7 +621,7 @@ async function addTradeToHistory(trade: Trade, tradeTeams: any[], assets: any[])
       } else if (asset.asset_type === 'cap_space' && asset.cap_amount) {
         item.type = 'cap';
         item.capAmount = parseFloat(asset.cap_amount);
-        item.capYear = currentYear;
+        item.capYear = asset.cap_year || 2026;
       }
       
       // Assign to correct team's received list

@@ -173,6 +173,15 @@ export default function MyTeamScreen() {
         )}
       </View>
 
+      {/* Cap Projections Link */}
+      <Link href="/(tabs)/projections" asChild>
+        <TouchableOpacity style={styles.projectionButton}>
+          <Ionicons name="trending-up" size={20} color={colors.primary} />
+          <Text style={styles.projectionButtonText}>View Cap Projections</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
+      </Link>
+
       {/* Roster Section */}
       <View style={styles.rosterSection}>
         <Text style={styles.sectionTitle}>Roster ({roster?.length || 0})</Text>
@@ -485,5 +494,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: colors.primary,
     marginRight: spacing.sm,
+  },
+  projectionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  projectionButtonText: {
+    flex: 1,
+    fontSize: fontSize.md,
+    fontWeight: '600',
+    color: colors.text,
+    marginLeft: spacing.sm,
   },
 });
