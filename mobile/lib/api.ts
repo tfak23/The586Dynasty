@@ -434,6 +434,8 @@ export const updateLeagueHistory = (leagueId: string, historyId: string, data: P
   api.put<{ data: LeagueHistoryRecord }>(`/api/leagues/${leagueId}/history/${historyId}`, data);
 export const createLeagueHistory = (leagueId: string, data: Partial<LeagueHistoryRecord>) =>
   api.post<{ data: LeagueHistoryRecord }>(`/api/leagues/${leagueId}/history`, data);
+export const syncLeagueHistorySeason = (leagueId: string, season?: number) =>
+  api.post<{ data: { season: number; updated: any[] } }>(`/api/leagues/${leagueId}/history/sync-season`, { season });
 
 // =============================================
 // LEAGUE BUY-INS
