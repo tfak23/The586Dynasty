@@ -88,7 +88,7 @@ contractRoutes.get('/league/:leagueId/with-evaluations', async (req, res, next) 
     // Get league rankings for all contracts (for evaluation data)
     const rankings = await getLeagueContractRankings(leagueId);
 
-    // Get player stats for PPG check and rookie detection
+    // Get player stats for PPG check, rookie detection, and position rankings
     const playerStats = await query(`
       SELECT player_id, avg_points_per_game
       FROM player_season_stats
@@ -96,54 +96,110 @@ contractRoutes.get('/league/:leagueId/with-evaluations', async (req, res, next) 
     `);
     const statsMap = new Map(playerStats.map((s: any) => [s.player_id, parseFloat(s.avg_points_per_game)]));
 
-    // Get count of stats records per player to detect rookies (no historical stats)
+    // Get stats from the last 3 seasons (2023, 2024, 2025) to detect true rookies
+    // A player is only a ROOKIE if they have NO stats in any of these 3 seasons
+    // This prevents veterans who missed a season due to injury from being marked as rookies
     const playerStatsCounts = await query(`
-      SELECT player_id, COUNT(*) as stat_count
+      SELECT player_id, 
+             COUNT(*) as stat_count,
+             MAX(season) as latest_season,
+             COUNT(CASE WHEN season >= 2023 THEN 1 END) as recent_stat_count
       FROM player_season_stats
       GROUP BY player_id
     `);
-    const statsCountMap = new Map(playerStatsCounts.map((s: any) => [s.player_id, parseInt(s.stat_count)]));
+    const statsCountMap = new Map(playerStatsCounts.map((s: any) => [s.player_id, {
+      total: parseInt(s.stat_count),
+      recentCount: parseInt(s.recent_stat_count) || 0,
+      latestSeason: parseInt(s.latest_season) || 0,
+    }]));
+
+    // Calculate position rankings by PPG for CORNERSTONE detection
+    // Group contracts by position and rank by PPG
+    const positionRankings: Map<string, Map<string, number>> = new Map();
+    const positions = ['QB', 'RB', 'WR', 'TE'];
+    
+    for (const pos of positions) {
+      const positionPlayers = contracts
+        .filter((c: any) => c.position === pos)
+        .map((c: any) => ({
+          playerId: c.player_id,
+          ppg: statsMap.get(c.player_id) || 0,
+        }))
+        .sort((a: any, b: any) => b.ppg - a.ppg);
+      
+      const rankMap = new Map<string, number>();
+      positionPlayers.forEach((p: any, i: number) => {
+        rankMap.set(p.playerId, i + 1);
+      });
+      positionRankings.set(pos, rankMap);
+    }
 
     // Attach evaluation data to each contract
     const contractsWithEval = contracts.map((c: any) => {
       const ranking = rankings.find(r => r.contractId === c.id);
-      const hasAnyStats = statsCountMap.get(c.player_id) || 0;
+      const statsInfo = statsCountMap.get(c.player_id) || { total: 0, recentCount: 0, latestSeason: 0 };
+      const playerPpg = statsMap.get(c.player_id) || 0;
 
-      // Check if rookie (no stats history at all)
-      if (hasAnyStats === 0) {
+      // Check if true rookie: NO stats in the last 3 seasons (2023, 2024, 2025)
+      // AND must have PPG >= 2 to avoid labeling inactive/IR players as rookies
+      const isTrueRookie = statsInfo.recentCount === 0 && playerPpg >= 2;
+      
+      if (isTrueRookie) {
         return {
           ...c,
           evaluation: {
             rating: 'ROOKIE',
             value_score: 0,
             rank: null,
+            ppg: playerPpg,
           },
         };
       }
 
-      // Calculate rating from valueScore
-      let contractRating: string = 'GOOD';
-      if (ranking) {
-        if (ranking.valueScore < -25) contractRating = 'BUST';
-        else if (ranking.valueScore >= 25) contractRating = 'STEAL';
+      const positionRank = positionRankings.get(c.position)?.get(c.player_id) || null;
 
-        // Check for LEGENDARY: top 10 rank + 50% value score
-        // BUT disqualify players with PPG < 10
-        if (ranking.valueScore >= 50 && ranking.rank <= 10) {
-          const playerPpg = statsMap.get(c.player_id);
-          const isDisqualifiedByLowPPG = playerPpg !== undefined && playerPpg < 10;
-          if (!isDisqualifiedByLowPPG) {
-            contractRating = 'LEGENDARY';
-          }
+      // Calculate rating from valueScore - MUST MATCH contractEvaluator.ts logic exactly
+      // LEGENDARY: Top 10 by value score AND PPG > 10
+      // CORNERSTONE: Not legendary, but top 5 at position in scoring
+      // Otherwise: STEAL (25%+), GOOD (-25% to +25%), BUST (<-25%)
+      let contractRating: string = 'GOOD';
+      let valueScore = 0;
+      let contractRank: number | null = null;
+
+      if (ranking) {
+        // Handle NaN values - treat as 0
+        valueScore = isNaN(ranking.valueScore) ? 0 : ranking.valueScore;
+        contractRank = ranking.rank;
+
+        // Check LEGENDARY first: Top 10 by value AND PPG > 10
+        const isTop10Value = contractRank !== null && contractRank <= 10;
+        const hasMinimumPPG = playerPpg > 10;
+
+        if (isTop10Value && hasMinimumPPG) {
+          contractRating = 'LEGENDARY';
         }
+        // Check CORNERSTONE: Top 5 at position in scoring (not legendary)
+        else if (positionRank !== null && positionRank <= 5) {
+          contractRating = 'CORNERSTONE';
+        }
+        // Normal evaluation based on value score
+        else if (valueScore < -25) {
+          contractRating = 'BUST';
+        } else if (valueScore >= 25) {
+          contractRating = 'STEAL';
+        }
+        // else stays 'GOOD' (between -25% and +25%)
       }
+      
       return {
         ...c,
-        evaluation: ranking ? {
+        evaluation: {
           rating: contractRating,
-          value_score: Math.round(ranking.valueScore),
-          rank: ranking.rank,
-        } : null,
+          value_score: Math.round(valueScore),
+          rank: contractRank,
+          position_rank: positionRank,
+          ppg: playerPpg,
+        },
       };
     });
 

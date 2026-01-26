@@ -12,12 +12,13 @@ const POSITIONS = ['All', 'QB', 'RB', 'WR', 'TE'] as const;
 type Position = typeof POSITIONS[number];
 
 type PlayerMode = 'signed' | 'freeagents';
-type RatingFilter = 'ALL' | 'LEGENDARY' | 'STEAL' | 'GOOD' | 'BUST' | 'ROOKIE';
+type RatingFilter = 'ALL' | 'LEGENDARY' | 'CORNERSTONE' | 'STEAL' | 'GOOD' | 'BUST' | 'ROOKIE';
 type SortBy = 'salary' | 'value';
 
 // Rating badge colors
 const RATING_COLORS: Record<ContractRating, { bg: string; text: string }> = {
   LEGENDARY: { bg: '#FFD700', text: '#1a1a2e' },
+  CORNERSTONE: { bg: '#06B6D4', text: '#ffffff' },
   STEAL: { bg: '#22C55E', text: '#ffffff' },
   GOOD: { bg: '#3B82F6', text: '#ffffff' },
   BUST: { bg: '#EF4444', text: '#ffffff' },
@@ -26,6 +27,7 @@ const RATING_COLORS: Record<ContractRating, { bg: string; text: string }> = {
 
 const RATING_ICONS: Record<ContractRating, keyof typeof Ionicons.glyphMap> = {
   LEGENDARY: 'trophy',
+  CORNERSTONE: 'diamond',
   STEAL: 'trending-up',
   GOOD: 'checkmark-circle',
   BUST: 'trending-down',
@@ -290,7 +292,7 @@ export default function PlayersScreen() {
                   All
                 </Text>
               </TouchableOpacity>
-              {(['LEGENDARY', 'STEAL', 'GOOD', 'BUST', 'ROOKIE'] as const).map((rating) => (
+              {(['LEGENDARY', 'CORNERSTONE', 'STEAL', 'GOOD', 'BUST', 'ROOKIE'] as const).map((rating) => (
                 <TouchableOpacity
                   key={rating}
                   style={[
@@ -383,15 +385,24 @@ export default function PlayersScreen() {
                     <Text style={styles.salaryAmount}>${parseFloat(String(player.salary)).toFixed(0)}/yr</Text>
                     <Text style={styles.contractYears}>{player.years_remaining}yr left</Text>
                   </View>
-                  {player.evaluation && (
+                  {player.evaluation && player.evaluation.value_score !== null && player.evaluation.value_score !== undefined && (
                     <View style={styles.detailItem}>
-                      <Text style={[
-                        styles.valueScore,
-                        { color: player.evaluation.value_score >= 0 ? colors.success : colors.error }
-                      ]}>
-                        {player.evaluation.value_score > 0 ? '+' : ''}{player.evaluation.value_score}%
-                      </Text>
-                      <Text style={styles.valueLabel}>value</Text>
+                      {Math.abs(player.evaluation.value_score) < 5 ? (
+                        <>
+                          <Text style={[styles.valueScore, { color: colors.primary }]}>Fair</Text>
+                          <Text style={styles.valueLabel}>value</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Text style={[
+                            styles.valueScore,
+                            { color: player.evaluation.value_score >= 0 ? colors.success : colors.error }
+                          ]}>
+                            {player.evaluation.value_score > 0 ? '+' : ''}{player.evaluation.value_score}%
+                          </Text>
+                          <Text style={styles.valueLabel}>value</Text>
+                        </>
+                      )}
                     </View>
                   )}
                   <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />

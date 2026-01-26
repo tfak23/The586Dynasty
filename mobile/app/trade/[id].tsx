@@ -1,9 +1,9 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, Platform } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, borderRadius, positionColors } from '@/lib/theme';
-import { getTrade, acceptTrade, rejectTrade, voteTrade, processTradeApproval } from '@/lib/api';
+import { getTrade, acceptTrade, rejectTrade, voteTrade, processTradeApproval, withdrawTrade } from '@/lib/api';
 import { useAppStore } from '@/lib/store';
 
 type Position = 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DEF';
@@ -23,25 +23,55 @@ export default function TradeDetailScreen() {
   });
 
   const acceptMutation = useMutation({
-    mutationFn: async () => acceptTrade(id, currentTeam?.id || ''),
+    mutationFn: async () => {
+      if (!currentTeam?.id) {
+        throw new Error('No team selected. Please select your team in Settings first.');
+      }
+      console.log('[Trade Accept] team_id:', currentTeam.id, 'trade_id:', id);
+      return acceptTrade(id, currentTeam.id);
+    },
     onSuccess: () => {
-      Alert.alert('Success', 'Trade accepted!');
+      if (Platform.OS === 'web') {
+        (globalThis as any).alert('Trade accepted!');
+      } else {
+        Alert.alert('Success', 'Trade accepted!');
+      }
       queryClient.invalidateQueries();
     },
     onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to accept trade');
+      console.error('[Trade Accept Error]', error);
+      if (Platform.OS === 'web') {
+        (globalThis as any).alert(error.message || 'Failed to accept trade');
+      } else {
+        Alert.alert('Error', error.message || 'Failed to accept trade');
+      }
     },
   });
 
   const rejectMutation = useMutation({
-    mutationFn: async () => rejectTrade(id, currentTeam?.id || ''),
+    mutationFn: async () => {
+      if (!currentTeam?.id) {
+        throw new Error('No team selected. Please select your team in Settings first.');
+      }
+      console.log('[Trade Reject] team_id:', currentTeam.id, 'trade_id:', id);
+      return rejectTrade(id, currentTeam.id);
+    },
     onSuccess: () => {
-      Alert.alert('Rejected', 'Trade has been rejected.');
+      if (Platform.OS === 'web') {
+        (globalThis as any).alert('Trade has been rejected.');
+      } else {
+        Alert.alert('Rejected', 'Trade has been rejected.');
+      }
       queryClient.invalidateQueries();
       router.back();
     },
     onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to reject trade');
+      console.error('[Trade Reject Error]', error);
+      if (Platform.OS === 'web') {
+        (globalThis as any).alert(error.message || 'Failed to reject trade');
+      } else {
+        Alert.alert('Error', error.message || 'Failed to reject trade');
+      }
     },
   });
 
@@ -67,6 +97,33 @@ export default function TradeDetailScreen() {
     },
   });
 
+  const withdrawMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentTeam?.id) {
+        throw new Error('No team selected. Please select your team in Settings first.');
+      }
+      console.log('[Trade Withdraw] team_id:', currentTeam.id, 'trade_id:', id);
+      return withdrawTrade(id, currentTeam.id);
+    },
+    onSuccess: () => {
+      if (typeof window !== 'undefined') {
+        window.alert('Trade has been withdrawn.');
+      } else {
+        Alert.alert('Withdrawn', 'Trade has been withdrawn.');
+      }
+      queryClient.invalidateQueries();
+      router.back();
+    },
+    onError: (error: any) => {
+      console.error('[Trade Withdraw Error]', error);
+      if (typeof window !== 'undefined') {
+        window.alert(error.message || 'Failed to withdraw trade');
+      } else {
+        Alert.alert('Error', error.message || 'Failed to withdraw trade');
+      }
+    },
+  });
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -87,12 +144,15 @@ export default function TradeDetailScreen() {
   }
 
   const isInvolved = trade.teams?.some((t: any) => t.team_id === currentTeam?.id);
+  const isProposer = trade.proposer_team_id === currentTeam?.id;
+  // Only receivers with pending status can accept/reject (NOT the proposer)
   const needsMyResponse = trade.teams?.some(
     (t: any) => t.team_id === currentTeam?.id && t.status === 'pending'
-  );
+  ) && !isProposer;
   const isPending = trade.status === 'pending';
   const needsCommissioner = trade.status === 'pending_approval';
   const needsVotes = trade.status === 'voting';
+  const canWithdraw = isPending && isProposer;
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -152,7 +212,25 @@ export default function TradeDetailScreen() {
             
             <View style={styles.teamSection}>
               <View style={styles.teamHeader}>
-                <Text style={styles.teamName}>{team.team_name}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                  <Text style={styles.teamName}>{team.team_name}</Text>
+                  {trade.proposer_team_id && (
+                    <View style={{
+                      backgroundColor: team.team_id === trade.proposer_team_id ? colors.primary + '30' : colors.secondary + '30',
+                      paddingHorizontal: spacing.sm,
+                      paddingVertical: 2,
+                      borderRadius: borderRadius.sm,
+                    }}>
+                      <Text style={{
+                        fontSize: fontSize.xs,
+                        fontWeight: '600',
+                        color: team.team_id === trade.proposer_team_id ? colors.primary : colors.secondary,
+                      }}>
+                        {team.team_id === trade.proposer_team_id ? 'Proposer' : 'Receiver'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={{ fontSize: fontSize.sm, fontWeight: '600', textTransform: 'capitalize', color: getStatusColor(team.status) }}>
                   {team.status}
                 </Text>
@@ -172,9 +250,10 @@ export default function TradeDetailScreen() {
                         <Text style={styles.assetDetails}>
                           ${asset.salary}/yr • {asset.years_remaining}yr remaining
                         </Text>
+                        <Text style={styles.fromTeamText}>from {asset.from_team_name}</Text>
                       </View>
                     </>
-                  ) : (
+                  ) : asset.type === 'pick' ? (
                     <>
                       <View style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: borderRadius.sm, marginRight: spacing.sm, backgroundColor: colors.secondary }}>
                         <Ionicons name="document-text" size={12} color={colors.white} />
@@ -186,9 +265,21 @@ export default function TradeDetailScreen() {
                         {asset.pick_number && (
                           <Text style={styles.assetDetails}>Pick #{asset.pick_number}</Text>
                         )}
+                        <Text style={styles.fromTeamText}>from {asset.from_team_name}</Text>
                       </View>
                     </>
-                  )}
+                  ) : asset.type === 'cap' ? (
+                    <>
+                      <View style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: borderRadius.sm, marginRight: spacing.sm, backgroundColor: colors.warning }}>
+                        <Text style={styles.positionText}>CAP</Text>
+                      </View>
+                      <View style={styles.assetInfo}>
+                        <Text style={styles.assetName}>${asset.cap_amount} Cap Relief</Text>
+                        <Text style={styles.assetDetails}>Year: {asset.cap_year}</Text>
+                        <Text style={styles.fromTeamText}>from {asset.from_team_name}</Text>
+                      </View>
+                    </>
+                  ) : null}
                 </View>
               ))}
               
@@ -206,6 +297,14 @@ export default function TradeDetailScreen() {
           <Text style={styles.infoLabel}>Created</Text>
           <Text style={styles.infoValue}>{formatDate(trade.created_at)}</Text>
         </View>
+        {trade.expires_at && trade.status === 'pending' && (
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Expires</Text>
+            <Text style={[styles.infoValue, { color: new Date(trade.expires_at) < new Date() ? colors.error : colors.warning }]}>
+              {formatDate(trade.expires_at)}
+            </Text>
+          </View>
+        )}
         {trade.notes && (
           <View style={styles.notesSection}>
             <Text style={styles.infoLabel}>Notes</Text>
@@ -250,13 +349,19 @@ export default function TradeDetailScreen() {
               </Text>
             </TouchableOpacity>
             
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.rejectButton}
               onPress={() => {
-                Alert.alert('Reject Trade', 'Are you sure?', [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Reject', style: 'destructive', onPress: () => rejectMutation.mutate() },
-                ]);
+                if (Platform.OS === 'web') {
+                  if ((globalThis as any).confirm('Are you sure you want to reject this trade?')) {
+                    rejectMutation.mutate();
+                  }
+                } else {
+                  Alert.alert('Reject Trade', 'Are you sure?', [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Reject', style: 'destructive', onPress: () => rejectMutation.mutate() },
+                  ]);
+                }
               }}
               disabled={rejectMutation.isPending}
             >
@@ -264,6 +369,25 @@ export default function TradeDetailScreen() {
               <Text style={styles.actionButtonText}>
                 {rejectMutation.isPending ? 'Rejecting...' : 'Reject Trade'}
               </Text>
+            </TouchableOpacity>
+
+            {/* Counter Offer button */}
+            <TouchableOpacity
+              style={styles.counterOfferButton}
+              onPress={() => {
+                // Navigate to new trade with counter offer data
+                // The original trade will be auto-rejected when counter is sent
+                router.push({
+                  pathname: '/trade/new',
+                  params: {
+                    counterOfferId: id,
+                    partnerId: (trade as any).proposer_team_id,
+                  },
+                });
+              }}
+            >
+              <Ionicons name="swap-horizontal" size={20} color={colors.white} />
+              <Text style={styles.actionButtonText}>Counter Offer</Text>
             </TouchableOpacity>
           </>
         )}
@@ -299,7 +423,7 @@ export default function TradeDetailScreen() {
           <>
             <Text style={styles.commissionerPrompt}>Commissioner Action Required:</Text>
             <View style={styles.voteButtons}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.voteApprove}
                 onPress={() => commissionerMutation.mutate(true)}
                 disabled={commissionerMutation.isPending}
@@ -307,8 +431,8 @@ export default function TradeDetailScreen() {
                 <Ionicons name="checkmark-circle" size={20} color={colors.white} />
                 <Text style={styles.voteButtonText}>Approve</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={styles.voteReject}
                 onPress={() => commissionerMutation.mutate(false)}
                 disabled={commissionerMutation.isPending}
@@ -318,6 +442,33 @@ export default function TradeDetailScreen() {
               </TouchableOpacity>
             </View>
           </>
+        )}
+
+        {/* Withdraw button for proposer */}
+        {canWithdraw && (
+          <TouchableOpacity
+            style={styles.withdrawButton}
+            onPress={() => {
+              if (typeof window !== 'undefined') {
+                // Web browser
+                if (window.confirm('Are you sure you want to withdraw this trade proposal?')) {
+                  withdrawMutation.mutate();
+                }
+              } else {
+                // Native
+                Alert.alert('Withdraw Trade', 'Are you sure you want to withdraw this trade proposal?', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Withdraw', style: 'destructive', onPress: () => withdrawMutation.mutate() },
+                ]);
+              }
+            }}
+            disabled={withdrawMutation.isPending}
+          >
+            <Ionicons name="arrow-undo" size={20} color={colors.white} />
+            <Text style={styles.actionButtonText}>
+              {withdrawMutation.isPending ? 'Withdrawing...' : 'Withdraw Trade'}
+            </Text>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -456,6 +607,12 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.xs,
   },
+  fromTeamText: {
+    fontSize: fontSize.xs,
+    color: colors.primary,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
   noAssets: {
     fontSize: fontSize.sm,
     color: colors.textMuted,
@@ -589,5 +746,23 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: '600',
     marginLeft: spacing.sm,
+  },
+  withdrawButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.md,
+    backgroundColor: colors.warning,
+  },
+  counterOfferButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.sm,
+    backgroundColor: colors.secondary,
   },
 });

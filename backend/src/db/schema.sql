@@ -193,13 +193,16 @@ CREATE TABLE trades (
     -- Commissioner Approval
     commissioner_approved_by UUID REFERENCES teams(id),
     commissioner_approved_at TIMESTAMP,
-    
+
     -- Expiration
     expires_at TIMESTAMP NOT NULL,
-    
+
+    -- Proposer (team that initiated the trade)
+    proposer_team_id UUID REFERENCES teams(id),
+
     -- Notes
     notes TEXT,
-    
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

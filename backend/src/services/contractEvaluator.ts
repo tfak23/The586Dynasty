@@ -1,11 +1,11 @@
 // Contract Evaluation Service
 // Rates existing contracts compared to market value
-// Ratings: ROOKIE, BUST, GOOD, STEAL, LEGENDARY
+// Ratings: ROOKIE, BUST, CORNERSTONE, GOOD, STEAL, LEGENDARY
 
 import { query, queryOne } from '../db/index.js';
 import { estimateContract, ContractEstimate } from './contractEstimator.js';
 
-export type ContractRating = 'ROOKIE' | 'BUST' | 'GOOD' | 'STEAL' | 'LEGENDARY';
+export type ContractRating = 'ROOKIE' | 'BUST' | 'CORNERSTONE' | 'GOOD' | 'STEAL' | 'LEGENDARY';
 
 export interface ContractEvaluation {
   rating: ContractRating;
@@ -14,6 +14,7 @@ export interface ContractEvaluation {
   estimated_salary: number;
   salary_difference: number;     // estimated - actual (positive = saving money)
   league_rank: number | null;    // Rank among all contracts (1 = best value)
+  position_rank?: number | null; // Rank at position by PPG (for CORNERSTONE)
   total_contracts: number;       // Total contracts in league
   comparable_contracts: any[];
   reasoning: string;
@@ -37,15 +38,21 @@ interface ContractWithPlayer {
  * value_score = (estimated - actual) / estimated * 100
  * Positive score = paying less than market value (good)
  * Negative score = paying more than market value (bad)
+ *
+ * LEGENDARY: Top 10 by value score AND PPG > 10
+ * CORNERSTONE: Not legendary, but top 5 at position in scoring
+ * STEAL: Saving 25%+ vs market
+ * GOOD: Between -25% and +25%
+ * BUST: Paying 25%+ over market
  */
 const RATING_THRESHOLDS = {
   BUST: -25,      // Paying 25%+ over market
   GOOD_MIN: -25,  // Between -25% and +25%
   GOOD_MAX: 25,
-  STEAL: 25,      // Saving 25-50% vs market
-  LEGENDARY_MIN_SCORE: 50,  // Must be saving 50%+ AND
-  LEGENDARY_MAX_RANK: 10,   // In top 10 contracts
-  LEGENDARY_MIN_PPG: 10,    // Players below this PPG cannot be LEGENDARY (disqualifier)
+  STEAL: 25,      // Saving 25%+ vs market
+  LEGENDARY_MAX_RANK: 10,   // Must be top 10 by value score
+  LEGENDARY_MIN_PPG: 10,    // AND PPG > 10
+  CORNERSTONE_MAX_POSITION_RANK: 5, // Top 5 at their position by PPG (if not LEGENDARY)
 };
 
 /**
@@ -57,7 +64,8 @@ function generateEvaluationReasoning(
   actualSalary: number,
   estimatedSalary: number,
   position: string,
-  leagueRank: number | null
+  leagueRank: number | null,
+  positionRank?: number | null
 ): string {
   const diff = Math.abs(estimatedSalary - actualSalary);
   const percentDiff = Math.abs(valueScore);
@@ -65,6 +73,8 @@ function generateEvaluationReasoning(
   switch (rating) {
     case 'LEGENDARY':
       return `Elite value! #${leagueRank} best contract in the league. Saving $${diff.toFixed(0)}/year (${percentDiff.toFixed(0)}% below market) for this ${position}.`;
+    case 'CORNERSTONE':
+      return `Elite producer! Top ${positionRank} ${position} in the league. Premium price justified by top-tier performance.`;
     case 'STEAL':
       return `Great deal! Paying $${diff.toFixed(0)} less than market value (${percentDiff.toFixed(0)}% savings) for this ${position}.`;
     case 'GOOD':
@@ -80,6 +90,39 @@ function generateEvaluationReasoning(
     default:
       return `Contract evaluation for ${position}.`;
   }
+}
+
+/**
+ * Get position rankings by PPG for all players at a position
+ * Used to determine CORNERSTONE status (top 5 at position)
+ */
+export async function getPositionRankings(
+  leagueId: string,
+  position: string,
+  season: number = 2025
+): Promise<{ playerId: string; playerName: string; ppg: number; rank: number }[]> {
+  // Get all players at this position with contracts and stats
+  const players = await query<{ player_id: string; full_name: string; avg_points_per_game: string }>(
+    `SELECT DISTINCT c.player_id, p.full_name, ps.avg_points_per_game
+     FROM contracts c
+     JOIN players p ON c.player_id = p.id
+     JOIN player_season_stats ps ON c.player_id = ps.player_id AND ps.season = $3
+     WHERE c.league_id = $1
+       AND p.position = $2
+       AND c.status = 'active'
+       AND c.salary > 0
+       AND ps.avg_points_per_game IS NOT NULL
+     ORDER BY ps.avg_points_per_game DESC`,
+    [leagueId, position, season]
+  );
+
+  // Add rank
+  return players.map((p, i) => ({
+    playerId: p.player_id,
+    playerName: p.full_name,
+    ppg: parseFloat(p.avg_points_per_game),
+    rank: i + 1,
+  }));
 }
 
 /**
@@ -133,7 +176,12 @@ export async function getLeagueContractRankings(
   );
 
   // Sort by value score (highest = best value = rank 1)
-  scored.sort((a, b) => b.valueScore - a.valueScore);
+  // Handle NaN values by treating them as 0 for sorting
+  scored.sort((a, b) => {
+    const aScore = isNaN(a.valueScore) ? 0 : a.valueScore;
+    const bScore = isNaN(b.valueScore) ? 0 : b.valueScore;
+    return bScore - aScore;
+  });
 
   // Add rank
   return scored.map((s, i) => ({ ...s, rank: i + 1 }));
@@ -164,24 +212,31 @@ export async function evaluateContract(
     throw new Error('Cannot evaluate $0 contracts - player is awaiting franchise tag or release');
   }
 
-  // 2. Get player stats - check if they have ANY historical stats
+  // 2. Get player stats for current season
   const stats = await queryOne<{ avg_points_per_game: string; games_played: number }>(`
     SELECT avg_points_per_game, games_played
     FROM player_season_stats
     WHERE player_id = $1 AND season = 2025
   `, [contract.player_id]);
 
-  // Check if player is a rookie (no stats from any previous season)
-  const hasAnyStats = await queryOne<{ count: string }>(`
-    SELECT COUNT(*) as count
+  // Check if player is a TRUE rookie - must have NO stats in the last 3 seasons (2023, 2024, 2025)
+  // This prevents veterans who missed a season due to injury from being marked as rookies
+  const recentStats = await queryOne<{ recent_count: string }>(`
+    SELECT COUNT(*) as recent_count
     FROM player_season_stats
-    WHERE player_id = $1
+    WHERE player_id = $1 AND season >= 2023
   `, [contract.player_id]);
 
-  const isRookie = !hasAnyStats || parseInt(hasAnyStats.count) === 0;
+  const recentStatsCount = recentStats ? parseInt(recentStats.recent_count) : 0;
+  const playerPpgForRookieCheck = stats ? parseFloat(stats.avg_points_per_game) : 0;
 
-  // If rookie, return early with ROOKIE rating
-  if (isRookie) {
+  // Only mark as ROOKIE if:
+  // 1. No stats in recent 3 seasons AND
+  // 2. Player has at least 2 PPG (to avoid marking IR/inactive as rookies)
+  const isTrueRookie = recentStatsCount === 0 && playerPpgForRookieCheck >= 2;
+
+  // If true rookie, return early with ROOKIE rating
+  if (isTrueRookie) {
     return {
       rating: 'ROOKIE' as ContractRating,
       value_score: 0,
@@ -215,46 +270,55 @@ export async function evaluateContract(
     valueScore = ((estimatedSalary - actualSalary) / estimatedSalary) * 100;
   }
 
-  // 5. Determine base rating from thresholds
-  let rating: ContractRating;
-  if (valueScore < RATING_THRESHOLDS.BUST) {
-    rating = 'BUST';
-  } else if (valueScore < RATING_THRESHOLDS.STEAL) {
-    rating = 'GOOD';
-  } else {
-    rating = 'STEAL';
-  }
+  // 5. Get player PPG for rating checks
+  const playerPpg = stats ? parseFloat(stats.avg_points_per_game) : null;
 
-  // 6. Check for LEGENDARY (requires league-wide comparison)
+  // 6. Get position rankings for CORNERSTONE check
+  const positionRankings = await getPositionRankings(leagueId, contract.position, 2025);
+  const playerPositionRank = positionRankings.find(r => r.playerId === contract.player_id);
+  const positionRank = playerPositionRank?.rank || null;
+
+  // 7. Get league contract rankings for LEGENDARY check
   const rankings = await getLeagueContractRankings(leagueId);
   const playerRank = rankings.find(r => r.contractId === contractId);
   const leagueRank = playerRank?.rank || null;
 
-  // Get player PPG for LEGENDARY check
-  const playerPpg = stats ? parseFloat(stats.avg_points_per_game) : null;
+  // 8. Determine rating using simplified logic:
+  // LEGENDARY: Top 10 by value score AND PPG > 10
+  // CORNERSTONE: Not legendary, but top 5 at position in scoring
+  // Otherwise: STEAL (25%+), GOOD (-25% to +25%), BUST (<-25%)
 
-  // LEGENDARY requires: top 10 rank AND 50%+ value score
-  // BUT players with low PPG (<10) are disqualified (prevents low-production players like Will Shipley)
-  const meetsLegendaryValueCriteria =
-    leagueRank !== null &&
-    leagueRank <= RATING_THRESHOLDS.LEGENDARY_MAX_RANK &&
-    valueScore >= RATING_THRESHOLDS.LEGENDARY_MIN_SCORE;
+  let rating: ContractRating;
 
-  // Disqualify if PPG is below threshold
-  const isDisqualifiedByLowPPG = playerPpg !== null && playerPpg < RATING_THRESHOLDS.LEGENDARY_MIN_PPG;
+  // Check LEGENDARY first: Top 10 by value AND PPG > 10
+  const isTop10Value = leagueRank !== null && leagueRank <= RATING_THRESHOLDS.LEGENDARY_MAX_RANK;
+  const hasMinimumPPG = playerPpg !== null && playerPpg > RATING_THRESHOLDS.LEGENDARY_MIN_PPG;
 
-  if (meetsLegendaryValueCriteria && !isDisqualifiedByLowPPG) {
+  if (isTop10Value && hasMinimumPPG) {
     rating = 'LEGENDARY';
   }
+  // Check CORNERSTONE: Top 5 at position in scoring (not legendary)
+  else if (positionRank !== null && positionRank <= RATING_THRESHOLDS.CORNERSTONE_MAX_POSITION_RANK) {
+    rating = 'CORNERSTONE';
+  }
+  // Normal evaluation based on value score
+  else if (valueScore < RATING_THRESHOLDS.BUST) {
+    rating = 'BUST';
+  } else if (valueScore >= RATING_THRESHOLDS.STEAL) {
+    rating = 'STEAL';
+  } else {
+    rating = 'GOOD';
+  }
 
-  // 7. Generate reasoning
+  // 9. Generate reasoning
   const reasoning = generateEvaluationReasoning(
     rating,
     valueScore,
     actualSalary,
     estimatedSalary,
     contract.position,
-    leagueRank
+    leagueRank,
+    positionRank
   );
 
   return {
@@ -264,6 +328,7 @@ export async function evaluateContract(
     estimated_salary: estimatedSalary,
     salary_difference: estimatedSalary - actualSalary,
     league_rank: leagueRank,
+    position_rank: positionRank,
     total_contracts: rankings.length,
     comparable_contracts: estimate.comparable_players,
     reasoning,
@@ -277,4 +342,5 @@ export async function evaluateContract(
 export default {
   evaluateContract,
   getLeagueContractRankings,
+  getPositionRankings,
 };

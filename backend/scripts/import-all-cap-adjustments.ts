@@ -9,6 +9,7 @@ const pool = new Pool({
 
 // Cap adjustment data by owner name (Sleeper usernames)
 // HITS are positive (charge cap), CREDITS are negative (give cap back)
+// Trade descriptions include partner names: "Trade 25.19 with Dom (+$10 cap hit)"
 const capAdjustmentsData: Record<string, {
   hits: Array<{ description: string; amount_2026: number; amount_2027: number }>;
   credits: Array<{ description: string; amount_2026: number; amount_2027: number }>;
@@ -27,28 +28,28 @@ const capAdjustmentsData: Record<string, {
   // Brian (brcarnag - Trust the Process)
   'brcarnag': {
     hits: [
-      { description: 'Trade 25.19', amount_2026: 10, amount_2027: 0 },
-      { description: 'Trade 25.23', amount_2026: 10, amount_2027: 0 },
+      { description: 'Trade 25.19 with Dom (+$10 cap hit)', amount_2026: 10, amount_2027: 0 },
+      { description: 'Trade 25.23 with Dan (+$10 cap hit)', amount_2026: 10, amount_2027: 0 },
       { description: 'Kendre Miller cut', amount_2026: 2, amount_2027: 1 },
     ],
     credits: [
-      { description: 'Trade 24.25 (credit)', amount_2026: 12, amount_2027: 0 },
+      { description: 'Trade 24.25 with Dan (-$12 cap credit)', amount_2026: 12, amount_2027: 0 },
     ],
   },
 
   // Dan (CanThePan - Lamborghini Love)
   'CanThePan': {
     hits: [
-      { description: 'Trade 24.25', amount_2026: 12, amount_2027: 0 },
+      { description: 'Trade 24.25 with Brian (+$12 cap hit)', amount_2026: 12, amount_2027: 0 },
       { description: 'Javonte Williams cut', amount_2026: 12, amount_2027: 5 },
       { description: 'Devin Singletary cut', amount_2026: 5, amount_2027: 0 },
-      { description: 'Trevor Lawrence trade', amount_2026: 12, amount_2027: 5 },
+      { description: 'Trevor Lawrence dead cap', amount_2026: 12, amount_2027: 5 },
       { description: 'Devontez Walker cut', amount_2026: 1, amount_2027: 0 },
     ],
     credits: [
-      { description: 'Trade 26.02 (credit)', amount_2026: 53, amount_2027: 0 },
-      { description: 'Trade 25.17 (credit)', amount_2026: 9, amount_2027: 0 },
-      { description: 'Trade 25.23 (credit)', amount_2026: 10, amount_2027: 0 },
+      { description: 'Trade 26.02 with Tony (-$53 cap credit)', amount_2026: 53, amount_2027: 0 },
+      { description: 'Trade 25.17 with Trudy (-$9 cap credit)', amount_2026: 9, amount_2027: 0 },
+      { description: 'Trade 25.23 with Brian (-$10 cap credit)', amount_2026: 10, amount_2027: 0 },
     ],
   },
 
@@ -57,10 +58,10 @@ const capAdjustmentsData: Record<string, {
     hits: [
       { description: 'Darren Waller cut', amount_2026: 2, amount_2027: 0 },
       { description: 'Kadarius Toney cut', amount_2026: 2, amount_2027: 0 },
-      { description: 'Isiah Pacheco trade', amount_2026: 7, amount_2027: 3 },
+      { description: 'Isiah Pacheco dead cap', amount_2026: 7, amount_2027: 3 },
     ],
     credits: [
-      { description: 'Trade 25.19 (credit)', amount_2026: 10, amount_2027: 0 },
+      { description: 'Trade 25.19 with Brian (-$10 cap credit)', amount_2026: 10, amount_2027: 0 },
     ],
   },
 
@@ -70,7 +71,7 @@ const capAdjustmentsData: Record<string, {
       { description: 'Kenny Pickett cut', amount_2026: 2, amount_2027: 0 },
       { description: 'Jermaine Burton cut', amount_2026: 3, amount_2027: 0 },
       { description: 'Dontayvion Wicks cut', amount_2026: 4, amount_2027: 0 },
-      { description: 'Trade 25.03', amount_2026: 15, amount_2027: 0 },
+      { description: 'Trade 25.03 with Nick (+$15 cap hit)', amount_2026: 15, amount_2027: 0 },
       { description: 'Brenden Rice cut', amount_2026: 1, amount_2027: 0 },
     ],
     credits: [],
@@ -89,14 +90,14 @@ const capAdjustmentsData: Record<string, {
   // Nick (NickDnof - Danny Dimes Era)
   'NickDnof': {
     hits: [
-      { description: 'Pat Freiermuth trade', amount_2026: 5, amount_2027: 2 },
-      { description: 'Jahan Dotson trade', amount_2026: 3, amount_2027: 0 },
-      { description: 'Tyreek Hill trade', amount_2026: 10, amount_2027: 0 },
+      { description: 'Pat Freiermuth dead cap', amount_2026: 5, amount_2027: 2 },
+      { description: 'Jahan Dotson dead cap', amount_2026: 3, amount_2027: 0 },
+      { description: 'Tyreek Hill dead cap', amount_2026: 10, amount_2027: 0 },
       { description: 'Jaylin Hyatt cut', amount_2026: 1, amount_2027: 0 },
-      { description: 'Anthony Richardson trade', amount_2026: 7, amount_2027: 3 },
+      { description: 'Anthony Richardson dead cap', amount_2026: 7, amount_2027: 3 },
     ],
     credits: [
-      { description: 'Trade 25.03 (credit)', amount_2026: 15, amount_2027: 0 },
+      { description: 'Trade 25.03 with Jamie (-$15 cap credit)', amount_2026: 15, amount_2027: 0 },
     ],
   },
 
@@ -104,19 +105,31 @@ const capAdjustmentsData: Record<string, {
   'TonyFF': {
     hits: [
       { description: 'Amari Cooper cut', amount_2026: 4, amount_2027: 2 },
-      { description: 'Trade 26.02', amount_2026: 53, amount_2027: 0 },
+      { description: 'Trade 26.02 with Dan (+$53 cap hit)', amount_2026: 53, amount_2027: 0 },
       { description: 'Tyler Lockett cut', amount_2026: 2, amount_2027: 0 },
       { description: 'Spencer Rattler cut', amount_2026: 4, amount_2027: 2 },
     ],
     credits: [],
   },
 
-  // Trudy (TrevorH42 - Davante's Inferno)
+  // Trevor (TrevorH42 - Davante's Inferno)
   'TrevorH42': {
     hits: [
-      { description: 'Quentin Johnston trade', amount_2026: 6, amount_2027: 3 },
-      { description: 'Trade 25.25', amount_2026: 8, amount_2027: 0 },
-      { description: 'Trade 25.17', amount_2026: 9, amount_2027: 0 },
+      { description: 'Deuce Vaughn cut', amount_2026: 2, amount_2027: 0 },
+      { description: 'Bryce Young dead cap', amount_2026: 7, amount_2027: 3 },
+      { description: 'Jonathan Mingo dead cap', amount_2026: 4, amount_2027: 2 },
+    ],
+    credits: [
+      { description: 'Trade 24.24 (-$15 cap credit)', amount_2026: 15, amount_2027: 0 },
+    ],
+  },
+
+  // Trudy (TrudyMac - Trudy's Team)
+  'TrudyMac': {
+    hits: [
+      { description: 'Quentin Johnston dead cap', amount_2026: 6, amount_2027: 3 },
+      { description: 'Trade 25.25 with Willy (+$8 cap hit)', amount_2026: 8, amount_2027: 0 },
+      { description: 'Trade 25.17 with Dan (+$9 cap hit)', amount_2026: 9, amount_2027: 0 },
       { description: 'Trevor Etienne cut', amount_2026: 1, amount_2027: 0 },
     ],
     credits: [],
@@ -128,16 +141,16 @@ const capAdjustmentsData: Record<string, {
       { description: 'Hendon Hooker cut', amount_2026: 4, amount_2027: 2 },
     ],
     credits: [
-      { description: 'Trade 25.25 (credit)', amount_2026: 8, amount_2027: 0 },
+      { description: 'Trade 25.25 with Trudy (-$8 cap credit)', amount_2026: 8, amount_2027: 0 },
     ],
   },
 
   // Zach (zachg1313 - J Jet2Holiday)
   'zachg1313': {
     hits: [
-      { description: 'Ben Sinnott trade', amount_2026: 3, amount_2027: 2 },
-      { description: 'Jahan Dotson trade', amount_2026: 2, amount_2027: 0 },
-      { description: 'Justin Fields trade', amount_2026: 12, amount_2027: 0 },
+      { description: 'Ben Sinnott dead cap', amount_2026: 3, amount_2027: 2 },
+      { description: 'Jahan Dotson dead cap', amount_2026: 2, amount_2027: 0 },
+      { description: 'Justin Fields dead cap', amount_2026: 12, amount_2027: 0 },
     ],
     credits: [],
   },

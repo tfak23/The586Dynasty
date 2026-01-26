@@ -1,16 +1,15 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl, Modal, TextInput, Alert, Platform } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl, Modal, TextInput, Alert, Platform, Pressable } from 'react-native';
 import { useState, useCallback } from 'react';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
-import { getLeagueBuyIns, getBuyInSeasons, getLeague, updateBuyIn, initializeBuyIns } from '@/lib/api';
+import { getLeagueBuyIns, getBuyInSeasons, updateBuyIn, initializeBuyIns } from '@/lib/api';
 import { useAppStore } from '@/lib/store';
 
-export default function BuyInsScreen() {
-  const { leagueId: paramLeagueId } = useLocalSearchParams<{ leagueId: string }>();
+export default function CommissionerBuyInsScreen() {
   const { currentLeague } = useAppStore();
-  const leagueId = paramLeagueId || currentLeague?.id;
+  const leagueId = currentLeague?.id;
   const queryClient = useQueryClient();
 
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
@@ -18,18 +17,10 @@ export default function BuyInsScreen() {
   const [editingBuyIn, setEditingBuyIn] = useState<any | null>(null);
   const [editAmountDue, setEditAmountDue] = useState('');
   const [editAmountPaid, setEditAmountPaid] = useState('');
-  const { currentTeam } = useAppStore();
+  const [showInitModal, setShowInitModal] = useState(false);
+  const [initAmountDue, setInitAmountDue] = useState('100');
 
-  const { data: league } = useQuery({
-    queryKey: ['league', leagueId],
-    queryFn: async () => {
-      const res = await getLeague(leagueId!);
-      return res.data.data;
-    },
-    enabled: !!leagueId,
-  });
-
-  const { data: seasons } = useQuery({
+  const { data: seasons, refetch: refetchSeasons } = useQuery({
     queryKey: ['buyInSeasons', leagueId],
     queryFn: async () => {
       const res = await getBuyInSeasons(leagueId!);
@@ -38,9 +29,9 @@ export default function BuyInsScreen() {
     enabled: !!leagueId,
   });
 
-  const effectiveSeason = selectedSeason || league?.current_season || 2026;
+  const effectiveSeason = selectedSeason || currentLeague?.current_season || 2025;
 
-  const { data: buyInsData, isLoading } = useQuery({
+  const { data: buyInsData, isLoading, refetch: refetchBuyIns } = useQuery({
     queryKey: ['buyIns', leagueId, effectiveSeason],
     queryFn: async () => {
       const res = await getLeagueBuyIns(leagueId!, effectiveSeason);
@@ -51,21 +42,19 @@ export default function BuyInsScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await queryClient.invalidateQueries({ queryKey: ['buyIns', leagueId] });
+    await Promise.all([refetchBuyIns(), refetchSeasons()]);
     setRefreshing(false);
-  }, [queryClient, leagueId]);
-
-  // Check if current user is commissioner (using settings.commissionerTeamIds)
-  const { settings } = useAppStore();
-  const isCommissioner = currentTeam && settings.commissionerTeamIds?.includes(currentTeam.id);
+  }, [refetchBuyIns, refetchSeasons]);
 
   const initializeMutation = useMutation({
     mutationFn: async () => {
-      return initializeBuyIns(leagueId!, effectiveSeason, 100); // Default $100 buy-in
+      const amount = parseFloat(initAmountDue) || 100;
+      return initializeBuyIns(leagueId!, effectiveSeason, amount);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['buyIns', leagueId] });
       queryClient.invalidateQueries({ queryKey: ['buyInSeasons', leagueId] });
+      setShowInitModal(false);
       if (Platform.OS === 'web') {
         (globalThis as any).alert('Buy-ins initialized for ' + effectiveSeason + ' season');
       } else {
@@ -115,9 +104,8 @@ export default function BuyInsScreen() {
     const amountDue = parseFloat(editAmountDue) || 0;
     const amountPaid = parseFloat(editAmountPaid) || 0;
 
-    // Determine status based on amounts
     let status = 'unpaid';
-    if (amountPaid >= amountDue) {
+    if (amountPaid >= amountDue && amountDue > 0) {
       status = 'paid';
     } else if (amountPaid > 0) {
       status = 'partial';
@@ -134,29 +122,61 @@ export default function BuyInsScreen() {
     });
   };
 
+  const handleMarkAllPaid = () => {
+    const unpaidBuyIns = buyIns.filter(b => b.status !== 'paid');
+    if (unpaidBuyIns.length === 0) {
+      if (Platform.OS === 'web') {
+        (globalThis as any).alert('All buy-ins are already paid!');
+      } else {
+        Alert.alert('Info', 'All buy-ins are already paid!');
+      }
+      return;
+    }
+
+    const confirmAction = () => {
+      unpaidBuyIns.forEach(buyIn => {
+        updateMutation.mutate({
+          buyInId: buyIn.id,
+          data: {
+            amount_paid: buyIn.amount_due,
+            status: 'paid',
+            paid_date: new Date().toISOString(),
+          },
+        });
+      });
+    };
+
+    if (Platform.OS === 'web') {
+      if ((globalThis as any).confirm(`Mark ${unpaidBuyIns.length} buy-ins as fully paid?`)) {
+        confirmAction();
+      }
+    } else {
+      Alert.alert(
+        'Confirm',
+        `Mark ${unpaidBuyIns.length} buy-ins as fully paid?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Mark All Paid', onPress: confirmAction },
+        ]
+      );
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'paid':
-        return colors.success;
-      case 'partial':
-        return colors.warning;
-      case 'unpaid':
-        return colors.error;
-      default:
-        return colors.textMuted;
+      case 'paid': return colors.success;
+      case 'partial': return colors.warning;
+      case 'unpaid': return colors.error;
+      default: return colors.textMuted;
     }
   };
 
   const getStatusIcon = (status: string): keyof typeof Ionicons.glyphMap => {
     switch (status) {
-      case 'paid':
-        return 'checkmark-circle';
-      case 'partial':
-        return 'time';
-      case 'unpaid':
-        return 'close-circle';
-      default:
-        return 'help-circle';
+      case 'paid': return 'checkmark-circle';
+      case 'partial': return 'time';
+      case 'unpaid': return 'close-circle';
+      default: return 'help-circle';
     }
   };
 
@@ -184,20 +204,21 @@ export default function BuyInsScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
-          <Text style={styles.title}>Buy-In Tracker</Text>
-          <Text style={styles.subtitle}>{league?.name || 'The 586 Dynasty'}</Text>
+          <Text style={styles.title}>Manage Buy-Ins</Text>
+          <Text style={styles.subtitle}>{currentLeague?.name}</Text>
         </View>
+        <Ionicons name="cash" size={28} color="#10B981" />
       </View>
 
       {/* Season Selector */}
-      {seasons && seasons.length > 0 && (
+      <View style={styles.seasonSection}>
+        <Text style={styles.sectionLabel}>Season</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={styles.seasonSelector}
           contentContainerStyle={styles.seasonSelectorContent}
         >
-          {seasons.map((season) => (
+          {(seasons && seasons.length > 0 ? seasons : [effectiveSeason]).map((season) => (
             <TouchableOpacity
               key={season}
               style={[
@@ -217,10 +238,31 @@ export default function BuyInsScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
-      )}
+      </View>
+
+      {/* Actions */}
+      <View style={styles.actionsRow}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => setShowInitModal(true)}
+        >
+          <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+          <Text style={styles.actionButtonText}>Initialize Season</Text>
+        </TouchableOpacity>
+
+        {buyIns.length > 0 && (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.actionButtonSuccess]}
+            onPress={handleMarkAllPaid}
+          >
+            <Ionicons name="checkmark-done-outline" size={20} color={colors.success} />
+            <Text style={[styles.actionButtonText, { color: colors.success }]}>Mark All Paid</Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Summary Card */}
-      {totals && (
+      {totals && buyIns.length > 0 && (
         <View style={styles.summaryCard}>
           <View style={styles.summaryRow}>
             <View style={styles.summaryItem}>
@@ -241,7 +283,6 @@ export default function BuyInsScreen() {
             </View>
           </View>
 
-          {/* Status counts */}
           <View style={styles.statusCounts}>
             <View style={styles.statusCount}>
               <Ionicons name="checkmark-circle" size={16} color={colors.success} />
@@ -257,18 +298,17 @@ export default function BuyInsScreen() {
             </View>
           </View>
 
-          {/* Progress bar */}
           <View style={styles.progressContainer}>
             <View style={styles.progressBar}>
               <View
                 style={[
                   styles.progressFill,
-                  { width: `${(totals.total_paid / totals.total_due) * 100}%` },
+                  { width: `${totals.total_due > 0 ? (totals.total_paid / totals.total_due) * 100 : 0}%` },
                 ]}
               />
             </View>
             <Text style={styles.progressText}>
-              {((totals.total_paid / totals.total_due) * 100).toFixed(0)}% Collected
+              {totals.total_due > 0 ? ((totals.total_paid / totals.total_due) * 100).toFixed(0) : 0}% Collected
             </Text>
           </View>
         </View>
@@ -276,27 +316,15 @@ export default function BuyInsScreen() {
 
       {/* Buy-in List */}
       <View style={styles.listSection}>
-        <Text style={styles.listTitle}>Payment Status</Text>
+        <Text style={styles.listTitle}>Team Buy-Ins</Text>
 
         {buyIns.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="cash-outline" size={48} color={colors.textMuted} />
-            <Text style={styles.emptyText}>No buy-in records for this season</Text>
+            <Text style={styles.emptyText}>No buy-in records for {effectiveSeason}</Text>
             <Text style={styles.emptySubtext}>
-              Commissioner can initialize buy-ins for this season
+              Click "Initialize Season" to create buy-in records for all teams
             </Text>
-            {isCommissioner && (
-              <TouchableOpacity
-                style={styles.initializeButton}
-                onPress={() => initializeMutation.mutate()}
-                disabled={initializeMutation.isPending}
-              >
-                <Ionicons name="add-circle-outline" size={20} color={colors.white} />
-                <Text style={styles.initializeButtonText}>
-                  {initializeMutation.isPending ? 'Initializing...' : `Initialize ${effectiveSeason} Buy-Ins`}
-                </Text>
-              </TouchableOpacity>
-            )}
           </View>
         ) : (
           buyIns.map((buyIn) => {
@@ -305,7 +333,11 @@ export default function BuyInsScreen() {
               : 0;
 
             return (
-              <View key={buyIn.id} style={styles.buyInCard}>
+              <TouchableOpacity
+                key={buyIn.id}
+                style={styles.buyInCard}
+                onPress={() => handleEditBuyIn(buyIn)}
+              >
                 <View style={styles.buyInHeader}>
                   <View style={styles.buyInInfo}>
                     <Text style={styles.ownerName}>{buyIn.owner_name}</Text>
@@ -314,14 +346,12 @@ export default function BuyInsScreen() {
                     )}
                   </View>
                   <View style={styles.headerActions}>
-                    {isCommissioner && (
-                      <TouchableOpacity
-                        style={styles.editButton}
-                        onPress={() => handleEditBuyIn(buyIn)}
-                      >
-                        <Ionicons name="pencil" size={16} color={colors.primary} />
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity
+                      style={styles.editIcon}
+                      onPress={() => handleEditBuyIn(buyIn)}
+                    >
+                      <Ionicons name="pencil" size={18} color={colors.primary} />
+                    </TouchableOpacity>
                     <View style={[styles.statusBadge, { backgroundColor: getStatusColor(buyIn.status) + '20' }]}>
                       <Ionicons name={getStatusIcon(buyIn.status)} size={14} color={getStatusColor(buyIn.status)} />
                       <Text style={[styles.statusText, { color: getStatusColor(buyIn.status) }]}>
@@ -331,7 +361,7 @@ export default function BuyInsScreen() {
                   </View>
                 </View>
 
-                {/* Individual Progress Bar */}
+                {/* Progress Bar */}
                 <View style={styles.individualProgress}>
                   <View style={styles.individualProgressBar}>
                     <View
@@ -370,17 +400,8 @@ export default function BuyInsScreen() {
                   )}
                 </View>
 
-                {buyIn.paid_date && (
-                  <Text style={styles.paidDate}>
-                    Paid on {new Date(buyIn.paid_date).toLocaleDateString()}
-                    {buyIn.payment_method && ` via ${buyIn.payment_method}`}
-                  </Text>
-                )}
-
-                {buyIn.notes && (
-                  <Text style={styles.notes}>{buyIn.notes}</Text>
-                )}
-              </View>
+                <Text style={styles.tapHint}>Tap to edit</Text>
+              </TouchableOpacity>
             );
           })
         )}
@@ -388,19 +409,77 @@ export default function BuyInsScreen() {
 
       <View style={{ height: 50 }} />
 
-      {/* Edit Buy-In Modal */}
+      {/* Initialize Modal */}
+      <Modal
+        visible={showInitModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowInitModal(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowInitModal(false)}
+        >
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Initialize Buy-Ins</Text>
+              <TouchableOpacity onPress={() => setShowInitModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalDescription}>
+              This will create buy-in records for all teams in the {effectiveSeason} season.
+            </Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Default Amount Due ($)</Text>
+              <TextInput
+                style={styles.input}
+                value={initAmountDue}
+                onChangeText={setInitAmountDue}
+                keyboardType="numeric"
+                placeholder="Enter default buy-in amount"
+                placeholderTextColor={colors.textMuted}
+              />
+              <Text style={styles.inputHint}>
+                You can adjust individual amounts after initialization
+              </Text>
+            </View>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowInitModal(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.saveButton}
+                onPress={() => initializeMutation.mutate()}
+                disabled={initializeMutation.isPending}
+              >
+                <Text style={styles.saveButtonText}>
+                  {initializeMutation.isPending ? 'Creating...' : 'Create Buy-Ins'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Edit Modal */}
       <Modal
         visible={!!editingBuyIn}
         transparent={true}
         animationType="fade"
         onRequestClose={() => setEditingBuyIn(null)}
       >
-        <TouchableOpacity
+        <Pressable
           style={styles.modalOverlay}
-          activeOpacity={1}
           onPress={() => setEditingBuyIn(null)}
         >
-          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Buy-In</Text>
               <TouchableOpacity onPress={() => setEditingBuyIn(null)}>
@@ -439,6 +518,22 @@ export default function BuyInsScreen() {
                   />
                 </View>
 
+                {/* Quick actions */}
+                <View style={styles.quickActions}>
+                  <TouchableOpacity
+                    style={styles.quickActionButton}
+                    onPress={() => setEditAmountPaid(editAmountDue)}
+                  >
+                    <Text style={styles.quickActionText}>Mark Fully Paid</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.quickActionButton}
+                    onPress={() => setEditAmountPaid('0')}
+                  >
+                    <Text style={styles.quickActionText}>Mark Unpaid</Text>
+                  </TouchableOpacity>
+                </View>
+
                 <View style={styles.modalButtons}>
                   <TouchableOpacity
                     style={styles.cancelButton}
@@ -452,14 +547,14 @@ export default function BuyInsScreen() {
                     disabled={updateMutation.isPending}
                   >
                     <Text style={styles.saveButtonText}>
-                      {updateMutation.isPending ? 'Saving...' : 'Save'}
+                      {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
                     </Text>
                   </TouchableOpacity>
                 </View>
               </>
             )}
-          </View>
-        </TouchableOpacity>
+          </Pressable>
+        </Pressable>
       </Modal>
     </ScrollView>
   );
@@ -504,12 +599,18 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: spacing.xs,
   },
-  seasonSelector: {
+  seasonSection: {
+    padding: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  sectionLabel: {
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
   seasonSelectorContent: {
-    padding: spacing.md,
     gap: spacing.sm,
   },
   seasonChip: {
@@ -533,8 +634,33 @@ const styles = StyleSheet.create({
   seasonChipTextActive: {
     color: colors.white,
   },
+  actionsRow: {
+    flexDirection: 'row',
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+  },
+  actionButtonSuccess: {
+    borderColor: colors.success,
+  },
+  actionButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+    color: colors.primary,
+  },
   summaryCard: {
     margin: spacing.md,
+    marginTop: 0,
     padding: spacing.md,
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
@@ -617,21 +743,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     textAlign: 'center',
   },
-  initializeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.primary,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    marginTop: spacing.lg,
-  },
-  initializeButtonText: {
-    color: colors.white,
-    fontWeight: '600',
-    fontSize: fontSize.md,
-  },
   buyInCard: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.md,
@@ -657,6 +768,14 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  editIcon: {
+    padding: spacing.xs,
+  },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -668,48 +787,6 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: fontSize.xs,
     fontWeight: '600',
-  },
-  buyInDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  amountRow: {
-    alignItems: 'center',
-  },
-  amountLabel: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-  },
-  amountValue: {
-    fontSize: fontSize.md,
-    fontWeight: '600',
-    color: colors.text,
-    marginTop: 2,
-  },
-  paidDate: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-    marginTop: spacing.sm,
-    fontStyle: 'italic',
-  },
-  notes: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  editButton: {
-    padding: spacing.xs,
   },
   individualProgress: {
     flexDirection: 'row',
@@ -733,6 +810,33 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     width: 35,
     textAlign: 'right',
+  },
+  buyInDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  amountRow: {
+    alignItems: 'center',
+  },
+  amountLabel: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+  },
+  amountValue: {
+    fontSize: fontSize.md,
+    fontWeight: '600',
+    color: colors.text,
+    marginTop: 2,
+  },
+  tapHint: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    fontStyle: 'italic',
   },
   modalOverlay: {
     flex: 1,
@@ -758,6 +862,11 @@ const styles = StyleSheet.create({
     fontSize: fontSize.lg,
     fontWeight: 'bold',
     color: colors.text,
+  },
+  modalDescription: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
   },
   modalSubtitle: {
     fontSize: fontSize.md,
@@ -786,6 +895,28 @@ const styles = StyleSheet.create({
     color: colors.text,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  inputHint: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  quickActionButton: {
+    flex: 1,
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+  },
+  quickActionText: {
+    fontSize: fontSize.sm,
+    color: colors.primary,
+    fontWeight: '500',
   },
   modalButtons: {
     flexDirection: 'row',

@@ -345,8 +345,70 @@ export async function quickEstimate(
   return Math.round(estimate);
 }
 
+/**
+ * Calculate franchise tag cost for a position
+ * QB/TE: Average of top 10 salaries from previous season
+ * RB/WR: Average of top 20 salaries from previous season
+ */
+export async function calculateFranchiseTagCost(
+  leagueId: string,
+  position: string,
+  season: number
+): Promise<{ tag_salary: number; calculation: string; top_salaries: { player_name: string; salary: number }[] }> {
+  // Only QB, RB, WR, TE can be franchise tagged
+  const validPositions = ['QB', 'RB', 'WR', 'TE'];
+  if (!validPositions.includes(position)) {
+    throw new Error(`Position ${position} is not eligible for franchise tag. Only QB, RB, WR, TE can be tagged.`);
+  }
+
+  // QB and TE use top 10, RB and WR use top 20
+  const topN = position === 'QB' || position === 'TE' ? 10 : 20;
+
+  // Get top salaries from the PREVIOUS season (season - 1)
+  const previousSeason = season - 1;
+
+  const topContracts = await query<{ full_name: string; salary: number }>(
+    `SELECT p.full_name, c.salary
+     FROM contracts c
+     JOIN players p ON c.player_id = p.id
+     WHERE c.league_id = $1
+       AND p.position = $2
+       AND c.start_season <= $3
+       AND c.end_season >= $3
+       AND c.status = 'active'
+     ORDER BY c.salary DESC
+     LIMIT $4`,
+    [leagueId, position, previousSeason, topN]
+  );
+
+  if (topContracts.length === 0) {
+    // Fall back to position average if no contracts found
+    const positionAvg = POSITION_RANGES[position]?.avg || 20;
+    return {
+      tag_salary: positionAvg,
+      calculation: `No ${position} contracts found for ${previousSeason}. Using position average.`,
+      top_salaries: [],
+    };
+  }
+
+  // Calculate average
+  const totalSalary = topContracts.reduce((sum, c) => sum + parseFloat(String(c.salary)), 0);
+  const averageSalary = totalSalary / topContracts.length;
+  const roundedSalary = Math.round(averageSalary);
+
+  return {
+    tag_salary: roundedSalary,
+    calculation: `Average of top ${topContracts.length} ${position} salaries from ${previousSeason} season`,
+    top_salaries: topContracts.map(c => ({
+      player_name: c.full_name,
+      salary: parseFloat(String(c.salary)),
+    })),
+  };
+}
+
 export default {
   estimateContract,
   quickEstimate,
   findComparablePlayers,
+  calculateFranchiseTagCost,
 };

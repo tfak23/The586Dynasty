@@ -298,12 +298,22 @@ teamRoutes.get('/:id/cap-projection', async (req, res, next) => {
     const currentSeason = league.current_season;
     const projections = [];
 
+    // Dead cap percentages based on years remaining on contract
+    // Index 0 = year 1 dead cap, Index 1 = year 2 dead cap, etc.
+    const DEAD_CAP_PERCENTAGES: Record<number, number[]> = {
+      5: [0.75, 0.50, 0.25, 0.10, 0.10],
+      4: [0.75, 0.50, 0.25, 0.10],
+      3: [0.50, 0.25, 0.10],
+      2: [0.50, 0.25],
+      1: [0.50],
+    };
+
     for (let year = 0; year < 5; year++) {
       const season = currentSeason + year;
 
-      // Get contract totals for this season
-      const contracts = await query(
-        `SELECT SUM(salary) as total_salary, COUNT(*) as contract_count
+      // Get contract details for this season (need individual contracts for guaranteed calc)
+      const contractsData = await query(
+        `SELECT id, salary, start_season, end_season, years_remaining
          FROM contracts
          WHERE team_id = $1
            AND status = 'active'
@@ -312,7 +322,34 @@ teamRoutes.get('/:id/cap-projection', async (req, res, next) => {
         [req.params.id, season]
       );
 
-      // Get dead money from cap_transactions (player releases)
+      // Calculate total salary and guaranteed (dead cap) for each contract
+      let totalSalary = 0;
+      let guaranteedSalary = 0;
+
+      for (const contract of contractsData) {
+        const salary = parseFloat(contract.salary) || 0;
+        totalSalary += salary;
+
+        // Calculate years remaining from this season's perspective
+        const yearsRemaining = contract.end_season - season + 1;
+
+        // Get dead cap percentage for releasing at this point
+        // Year index is how far into the contract projection we are
+        const yearIndex = season - currentSeason;
+        const originalYearsRemaining = contract.years_remaining || yearsRemaining;
+        const percentages = DEAD_CAP_PERCENTAGES[originalYearsRemaining] || [0.50];
+
+        // $1 contracts retain full cap hit
+        if (salary <= 1) {
+          guaranteedSalary += salary;
+        } else {
+          // Dead cap if cut at this point in the future
+          const deadCapPercent = percentages[yearIndex] || 0;
+          guaranteedSalary += Math.ceil(salary * deadCapPercent);
+        }
+      }
+
+      // Get dead money from cap_transactions (player releases already executed)
       const deadMoney = await queryOne(
         `SELECT COALESCE(SUM(amount), 0) as total
          FROM cap_transactions
@@ -337,7 +374,6 @@ teamRoutes.get('/:id/cap-projection', async (req, res, next) => {
         [req.params.id, season]
       );
 
-      const totalSalary = parseFloat(contracts[0]?.total_salary || '0');
       const totalDeadMoney = parseFloat(deadMoney?.total || '0');
       const totalCapAdjustments = parseFloat(capAdjustments?.total || '0');
       const combinedDeadMoney = totalDeadMoney + totalCapAdjustments;
@@ -345,12 +381,13 @@ teamRoutes.get('/:id/cap-projection', async (req, res, next) => {
       projections.push({
         season,
         committed_salary: totalSalary,
+        guaranteed_salary: guaranteedSalary + combinedDeadMoney, // What you'd owe if everyone was cut
         dead_money_releases: totalDeadMoney,
         dead_money_trades: totalCapAdjustments,
         dead_money: combinedDeadMoney,
         total_cap_used: totalSalary + combinedDeadMoney,
         cap_room: league.salary_cap - totalSalary - combinedDeadMoney,
-        contract_count: parseInt(contracts[0]?.contract_count || '0'),
+        contract_count: contractsData.length,
       });
     }
 
@@ -361,6 +398,52 @@ teamRoutes.get('/:id/cap-projection', async (req, res, next) => {
         team_name: team.team_name,
         salary_cap: league.salary_cap,
         projections,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get expiring contracts (pending_decision = true)
+teamRoutes.get('/:id/expiring-contracts', async (req, res, next) => {
+  try {
+    const contracts = await query(
+      `SELECT c.*, p.full_name, p.position, p.team as nfl_team, p.age
+       FROM contracts c
+       JOIN players p ON c.player_id = p.id
+       WHERE c.team_id = $1
+         AND c.status = 'active'
+         AND c.pending_decision = true
+       ORDER BY c.salary DESC`,
+      [req.params.id]
+    );
+
+    res.json({
+      status: 'success',
+      data: contracts,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get franchise tag usage for a team in a season
+teamRoutes.get('/:id/franchise-tag-usage/:season', async (req, res, next) => {
+  try {
+    const usage = await queryOne(
+      `SELECT ftu.*, p.full_name, p.position
+       FROM franchise_tag_usage ftu
+       JOIN players p ON ftu.player_id = p.id
+       WHERE ftu.team_id = $1 AND ftu.season = $2`,
+      [req.params.id, req.params.season]
+    );
+
+    res.json({
+      status: 'success',
+      data: {
+        has_used: !!usage,
+        tagged_player: usage || null,
       },
     });
   } catch (error) {
@@ -417,25 +500,28 @@ teamRoutes.get('/:id/dead-cap-breakdown', async (req, res, next) => {
     const yearColumn = `amount_${currentSeason}`;
 
     // Get dead money from player releases (cap_transactions)
+    // Join through contracts to get player info since cap_transactions uses related_contract_id, not player_id
     const releaseDeadMoney = await query(
       `SELECT
         ct.amount,
-        ct.reason,
+        ct.description as reason,
         ct.created_at,
         p.full_name as player_name,
         p.position
        FROM cap_transactions ct
-       LEFT JOIN players p ON ct.player_id = p.id
+       LEFT JOIN contracts c ON ct.related_contract_id = c.id
+       LEFT JOIN players p ON c.player_id = p.id
        WHERE ct.team_id = $1 AND ct.season = $2 AND ct.transaction_type = 'dead_money'
        ORDER BY ct.created_at DESC`,
       [req.params.id, currentSeason]
     );
 
     // Get dead money from trades (cap_adjustments)
+    // Use 'description' column, not 'reason'
     const tradeDeadMoney = await query(
       `SELECT
         ca.${yearColumn} as amount,
-        ca.reason,
+        ca.description as reason,
         ca.created_at,
         ca.trade_id
        FROM cap_adjustments ca
@@ -547,7 +633,7 @@ teamRoutes.post('/:id/cap-adjustment', async (req, res, next) => {
     }
 
     // Validate at least one year has an amount
-    const totalAmount = amount_2026 + amount_2027 + amount_2028 + amount_2029 + amount_2030;
+    const totalAmount = Number(amount_2026) + Number(amount_2027) + Number(amount_2028) + Number(amount_2029) + Number(amount_2030);
     if (totalAmount === 0) {
       throw new AppError('At least one year must have a non-zero amount', 400);
     }
@@ -558,12 +644,15 @@ teamRoutes.post('/:id/cap-adjustment', async (req, res, next) => {
       throw new AppError('Team not found', 404);
     }
 
-    // Insert cap adjustment
+    // Determine adjustment type based on total amount (positive = cap_hit, negative = cap_credit)
+    const adjustmentType = totalAmount > 0 ? 'cap_hit' : 'cap_credit';
+
+    // Insert cap adjustment with correct column names
     const adjustment = await queryOne(
-      `INSERT INTO cap_adjustments (team_id, reason, amount_2026, amount_2027, amount_2028, amount_2029, amount_2030, trade_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO cap_adjustments (team_id, league_id, adjustment_type, description, amount_2026, amount_2027, amount_2028, amount_2029, amount_2030, trade_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [teamId, reason, amount_2026, amount_2027, amount_2028, amount_2029, amount_2030, trade_id]
+      [teamId, team.league_id, adjustmentType, reason, amount_2026, amount_2027, amount_2028, amount_2029, amount_2030, trade_id]
     );
 
     res.status(201).json({

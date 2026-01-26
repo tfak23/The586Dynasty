@@ -722,11 +722,17 @@ leagueRoutes.get('/:id/buy-ins/seasons', async (req, res, next) => {
 // Update buy-in status (commissioner only)
 leagueRoutes.put('/:id/buy-ins/:buyInId', async (req, res, next) => {
   try {
-    const { amount_paid, status, payment_method, notes, paid_date } = req.body;
+    const { amount_due, amount_paid, status, payment_method, notes, paid_date } = req.body;
 
     const updates: string[] = [];
     const values: any[] = [];
     let paramIndex = 1;
+
+    if (amount_due !== undefined) {
+      updates.push(`amount_due = $${paramIndex}`);
+      values.push(amount_due);
+      paramIndex++;
+    }
 
     if (amount_paid !== undefined) {
       updates.push(`amount_paid = $${paramIndex}`);

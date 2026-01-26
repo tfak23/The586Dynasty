@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Modal } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Modal, Platform } from 'react-native';
 import { useState } from 'react';
 import { router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -13,9 +13,16 @@ export default function CommissionerCapScreen() {
 
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [showTeamPicker, setShowTeamPicker] = useState(false);
-  const [adjustmentAmount, setAdjustmentAmount] = useState('');
   const [adjustmentReason, setAdjustmentReason] = useState('');
   const [adjustmentType, setAdjustmentType] = useState<'add' | 'subtract'>('add');
+  const [showMultiYear, setShowMultiYear] = useState(false);
+  const [yearAmounts, setYearAmounts] = useState({
+    amount_2026: '',
+    amount_2027: '',
+    amount_2028: '',
+    amount_2029: '',
+    amount_2030: '',
+  });
 
   const { data: teams } = useQuery({
     queryKey: ['teams', currentLeague?.id],
@@ -46,20 +53,37 @@ export default function CommissionerCapScreen() {
     enabled: !!selectedTeamId,
   });
 
+  // Helper for cross-platform alerts
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}: ${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
   const createAdjustmentMutation = useMutation({
-    mutationFn: async (data: { reason: string; amount_2026: number }) => {
+    mutationFn: async (data: {
+      reason: string;
+      amount_2026?: number;
+      amount_2027?: number;
+      amount_2028?: number;
+      amount_2029?: number;
+      amount_2030?: number;
+    }) => {
       return createCapAdjustment(selectedTeamId!, data);
     },
     onSuccess: () => {
-      Alert.alert('Success', 'Cap adjustment applied successfully');
-      setAdjustmentAmount('');
+      showAlert('Success', 'Cap adjustment applied successfully');
+      setYearAmounts({ amount_2026: '', amount_2027: '', amount_2028: '', amount_2029: '', amount_2030: '' });
       setAdjustmentReason('');
+      setShowMultiYear(false);
       queryClient.invalidateQueries({ queryKey: ['capSummary', selectedTeamId] });
       queryClient.invalidateQueries({ queryKey: ['capAdjustments', selectedTeamId] });
       queryClient.invalidateQueries({ queryKey: ['leagueCapSummary'] });
     },
     onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to apply adjustment');
+      showAlert('Error', error.message || 'Failed to apply adjustment');
     },
   });
 
@@ -68,57 +92,108 @@ export default function CommissionerCapScreen() {
       return deleteCapAdjustment(selectedTeamId!, adjustmentId);
     },
     onSuccess: () => {
-      Alert.alert('Success', 'Cap adjustment deleted');
+      showAlert('Success', 'Cap adjustment deleted');
       queryClient.invalidateQueries({ queryKey: ['capSummary', selectedTeamId] });
       queryClient.invalidateQueries({ queryKey: ['capAdjustments', selectedTeamId] });
       queryClient.invalidateQueries({ queryKey: ['leagueCapSummary'] });
     },
     onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to delete adjustment');
+      showAlert('Error', error.message || 'Failed to delete adjustment');
     },
   });
 
   const handleApplyAdjustment = () => {
-    const amount = parseFloat(adjustmentAmount);
-    if (isNaN(amount) || amount <= 0) {
-      Alert.alert('Error', 'Please enter a valid amount');
+    // Parse all year amounts
+    const amounts = {
+      amount_2026: parseFloat(yearAmounts.amount_2026) || 0,
+      amount_2027: parseFloat(yearAmounts.amount_2027) || 0,
+      amount_2028: parseFloat(yearAmounts.amount_2028) || 0,
+      amount_2029: parseFloat(yearAmounts.amount_2029) || 0,
+      amount_2030: parseFloat(yearAmounts.amount_2030) || 0,
+    };
+
+    const totalAmount = amounts.amount_2026 + amounts.amount_2027 + amounts.amount_2028 + amounts.amount_2029 + amounts.amount_2030;
+
+    if (totalAmount === 0) {
+      if (Platform.OS === 'web') {
+        window.alert('Please enter at least one year amount');
+      } else {
+        Alert.alert('Error', 'Please enter at least one year amount');
+      }
       return;
     }
 
     if (!adjustmentReason.trim()) {
-      Alert.alert('Error', 'Please provide a reason for this adjustment');
+      if (Platform.OS === 'web') {
+        window.alert('Please provide a reason for this adjustment');
+      } else {
+        Alert.alert('Error', 'Please provide a reason for this adjustment');
+      }
       return;
     }
 
     // For "subtract" (removing dead cap), we use negative values
-    const finalAmount = adjustmentType === 'subtract' ? -amount : amount;
+    const multiplier = adjustmentType === 'subtract' ? -1 : 1;
+    const finalAmounts = {
+      amount_2026: amounts.amount_2026 * multiplier,
+      amount_2027: amounts.amount_2027 * multiplier,
+      amount_2028: amounts.amount_2028 * multiplier,
+      amount_2029: amounts.amount_2029 * multiplier,
+      amount_2030: amounts.amount_2030 * multiplier,
+    };
 
-    Alert.alert(
-      'Apply Cap Adjustment',
-      `This will ${adjustmentType === 'add' ? 'add' : 'remove'} $${amount} ${adjustmentType === 'add' ? 'dead cap to' : 'dead cap from'} ${selectedTeam?.team_name}.\n\nReason: ${adjustmentReason}`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Apply', onPress: () => {
-          createAdjustmentMutation.mutate({
-            reason: adjustmentReason,
-            amount_2026: finalAmount,
-          });
-        }},
-      ]
-    );
+    // Build summary message
+    const yearBreakdown = Object.entries(amounts)
+      .filter(([, val]) => val !== 0)
+      .map(([year, val]) => `${year.replace('amount_', '')}: $${val}`)
+      .join(', ');
+
+    const confirmMessage = `This will ${adjustmentType === 'add' ? 'add' : 'remove'} dead cap ${adjustmentType === 'add' ? 'to' : 'from'} ${selectedTeam?.team_name}.\n\n${yearBreakdown}\n\nReason: ${adjustmentReason}`;
+
+    if (Platform.OS === 'web') {
+      // Use window.confirm for web since Alert.alert callbacks don't work on web
+      if (window.confirm(confirmMessage)) {
+        createAdjustmentMutation.mutate({
+          reason: adjustmentReason,
+          ...finalAmounts,
+        });
+      }
+    } else {
+      Alert.alert(
+        'Apply Cap Adjustment',
+        confirmMessage,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Apply', onPress: () => {
+            createAdjustmentMutation.mutate({
+              reason: adjustmentReason,
+              ...finalAmounts,
+            });
+          }},
+        ]
+      );
+    }
   };
 
   const handleDeleteAdjustment = (adjustmentId: string, reason: string) => {
-    Alert.alert(
-      'Delete Adjustment',
-      `Are you sure you want to delete this cap adjustment?\n\n"${reason}"`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => {
-          deleteAdjustmentMutation.mutate(adjustmentId);
-        }},
-      ]
-    );
+    const confirmMessage = `Are you sure you want to delete this cap adjustment?\n\n"${reason}"`;
+    
+    if (Platform.OS === 'web') {
+      if (window.confirm(confirmMessage)) {
+        deleteAdjustmentMutation.mutate(adjustmentId);
+      }
+    } else {
+      Alert.alert(
+        'Delete Adjustment',
+        confirmMessage,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: () => {
+            deleteAdjustmentMutation.mutate(adjustmentId);
+          }},
+        ]
+      );
+    }
   };
 
   return (
@@ -208,19 +283,104 @@ export default function CommissionerCapScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Amount */}
-          <Text style={styles.inputLabel}>Amount</Text>
-          <View style={styles.amountInput}>
-            <Text style={styles.dollarSign}>$</Text>
-            <TextInput
-              style={styles.amountField}
-              placeholder="0"
-              placeholderTextColor={colors.textMuted}
-              value={adjustmentAmount}
-              onChangeText={setAdjustmentAmount}
-              keyboardType="decimal-pad"
-            />
+          {/* Year Amounts */}
+          <View style={styles.yearAmountsHeader}>
+            <Text style={styles.inputLabel}>Amount by Year</Text>
+            <TouchableOpacity
+              onPress={() => setShowMultiYear(!showMultiYear)}
+              style={styles.expandButton}
+            >
+              <Text style={styles.expandButtonText}>
+                {showMultiYear ? 'Show Less' : 'Show All Years'}
+              </Text>
+              <Ionicons
+                name={showMultiYear ? 'chevron-up' : 'chevron-down'}
+                size={16}
+                color={colors.primary}
+              />
+            </TouchableOpacity>
           </View>
+
+          {/* 2026 Amount (always visible) */}
+          <View style={styles.yearAmountRow}>
+            <Text style={styles.yearLabel}>2026</Text>
+            <View style={styles.yearAmountInput}>
+              <Text style={styles.dollarSign}>$</Text>
+              <TextInput
+                style={styles.yearAmountField}
+                placeholder="0"
+                placeholderTextColor={colors.textMuted}
+                value={yearAmounts.amount_2026}
+                onChangeText={(text) => setYearAmounts({ ...yearAmounts, amount_2026: text })}
+                keyboardType="decimal-pad"
+              />
+            </View>
+          </View>
+
+          {/* Additional years (expandable) */}
+          {showMultiYear && (
+            <>
+              <View style={styles.yearAmountRow}>
+                <Text style={styles.yearLabel}>2027</Text>
+                <View style={styles.yearAmountInput}>
+                  <Text style={styles.dollarSign}>$</Text>
+                  <TextInput
+                    style={styles.yearAmountField}
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    value={yearAmounts.amount_2027}
+                    onChangeText={(text) => setYearAmounts({ ...yearAmounts, amount_2027: text })}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.yearAmountRow}>
+                <Text style={styles.yearLabel}>2028</Text>
+                <View style={styles.yearAmountInput}>
+                  <Text style={styles.dollarSign}>$</Text>
+                  <TextInput
+                    style={styles.yearAmountField}
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    value={yearAmounts.amount_2028}
+                    onChangeText={(text) => setYearAmounts({ ...yearAmounts, amount_2028: text })}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.yearAmountRow}>
+                <Text style={styles.yearLabel}>2029</Text>
+                <View style={styles.yearAmountInput}>
+                  <Text style={styles.dollarSign}>$</Text>
+                  <TextInput
+                    style={styles.yearAmountField}
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    value={yearAmounts.amount_2029}
+                    onChangeText={(text) => setYearAmounts({ ...yearAmounts, amount_2029: text })}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.yearAmountRow}>
+                <Text style={styles.yearLabel}>2030</Text>
+                <View style={styles.yearAmountInput}>
+                  <Text style={styles.dollarSign}>$</Text>
+                  <TextInput
+                    style={styles.yearAmountField}
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    value={yearAmounts.amount_2030}
+                    onChangeText={(text) => setYearAmounts({ ...yearAmounts, amount_2030: text })}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+            </>
+          )}
 
           {/* Reason */}
           <Text style={styles.inputLabel}>Reason</Text>
@@ -238,10 +398,10 @@ export default function CommissionerCapScreen() {
           <TouchableOpacity
             style={[
               styles.applyButton,
-              (!adjustmentAmount || !adjustmentReason) && styles.applyButtonDisabled,
+              !adjustmentReason && styles.applyButtonDisabled,
             ]}
             onPress={handleApplyAdjustment}
-            disabled={!adjustmentAmount || !adjustmentReason}
+            disabled={!adjustmentReason}
           >
             <Text style={styles.applyButtonText}>Apply Adjustment</Text>
           </TouchableOpacity>
@@ -254,17 +414,24 @@ export default function CommissionerCapScreen() {
           <Text style={styles.sectionTitle}>Existing Adjustments</Text>
           <View style={styles.adjustmentsList}>
             {capAdjustments.adjustments.map((adj: any) => {
-              const totalAmount = (adj.amount_2026 || 0) + (adj.amount_2027 || 0) +
-                (adj.amount_2028 || 0) + (adj.amount_2029 || 0) + (adj.amount_2030 || 0);
+              // Parse amounts as numbers (they come as strings from DB)
+              const amt2026 = Number(adj.amount_2026) || 0;
+              const amt2027 = Number(adj.amount_2027) || 0;
+              const amt2028 = Number(adj.amount_2028) || 0;
+              const amt2029 = Number(adj.amount_2029) || 0;
+              const amt2030 = Number(adj.amount_2030) || 0;
+              const totalAmount = amt2026 + amt2027 + amt2028 + amt2029 + amt2030;
+              // Use description field (actual DB column) or fall back to reason
+              const displayReason = adj.description || adj.reason || 'Unknown';
               return (
                 <View key={adj.id} style={styles.adjustmentItem}>
                   <View style={styles.adjustmentInfo}>
-                    <Text style={styles.adjustmentReason}>{adj.reason}</Text>
+                    <Text style={styles.adjustmentReason}>{displayReason}</Text>
                     <Text style={styles.adjustmentDate}>
                       {new Date(adj.created_at).toLocaleDateString()}
                     </Text>
-                    {adj.amount_2026 !== 0 && (
-                      <Text style={styles.adjustmentYear}>2026: ${adj.amount_2026}</Text>
+                    {amt2026 !== 0 && (
+                      <Text style={styles.adjustmentYear}>2026: ${Math.round(amt2026)}</Text>
                     )}
                   </View>
                   <View style={styles.adjustmentActions}>
@@ -272,11 +439,11 @@ export default function CommissionerCapScreen() {
                       styles.adjustmentAmount,
                       { color: totalAmount >= 0 ? colors.error : colors.success }
                     ]}>
-                      {totalAmount >= 0 ? '+' : ''}${totalAmount}
+                      {totalAmount >= 0 ? '+' : ''}${Math.round(totalAmount)}
                     </Text>
                     <TouchableOpacity
                       style={styles.deleteBtn}
-                      onPress={() => handleDeleteAdjustment(adj.id, adj.reason)}
+                      onPress={() => handleDeleteAdjustment(adj.id, displayReason)}
                     >
                       <Ionicons name="trash-outline" size={18} color={colors.error} />
                     </TouchableOpacity>
@@ -456,7 +623,36 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
     marginTop: spacing.sm,
   },
-  amountInput: {
+  yearAmountsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  expandButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  expandButtonText: {
+    fontSize: fontSize.sm,
+    color: colors.primary,
+    fontWeight: '500',
+  },
+  yearAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  yearLabel: {
+    width: 50,
+    fontSize: fontSize.md,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  yearAmountInput: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
@@ -465,16 +661,16 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     paddingHorizontal: spacing.md,
   },
-  dollarSign: {
-    fontSize: fontSize.xl,
-    color: colors.textMuted,
-    marginRight: spacing.xs,
-  },
-  amountField: {
+  yearAmountField: {
     flex: 1,
     padding: spacing.md,
-    fontSize: fontSize.xl,
+    fontSize: fontSize.lg,
     color: colors.text,
+  },
+  dollarSign: {
+    fontSize: fontSize.lg,
+    color: colors.textMuted,
+    marginRight: spacing.xs,
   },
   reasonInput: {
     backgroundColor: colors.surface,

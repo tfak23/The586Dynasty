@@ -250,7 +250,7 @@ export const getSignedPlayers = (
   );
 
 // Contract Evaluation Types
-export type ContractRating = 'ROOKIE' | 'BUST' | 'GOOD' | 'STEAL' | 'LEGENDARY';
+export type ContractRating = 'ROOKIE' | 'BUST' | 'CORNERSTONE' | 'GOOD' | 'STEAL' | 'LEGENDARY';
 
 export interface ContractEvaluation {
   rating: ContractRating;
@@ -303,6 +303,22 @@ export const processTradeApproval = (id: string, approve: boolean, commissioner_
     : api.post(`/api/trades/${id}/reject`, { commissioner_team_id });
 export const cancelTrade = (id: string, team_id: string) =>
   api.post(`/api/trades/${id}/cancel`, { team_id });
+export const withdrawTrade = (id: string, team_id: string) =>
+  api.post(`/api/trades/${id}/withdraw`, { team_id });
+
+// Season Management
+export const advanceSeason = (leagueId: string, commissioner_team_id: string, franchise_tag_deadline?: string) =>
+  api.post(`/api/leagues/${leagueId}/advance-season`, { commissioner_team_id, franchise_tag_deadline });
+
+// Franchise Tags
+export const getExpiringContracts = (teamId: string) =>
+  api.get<{ data: any[] }>(`/api/teams/${teamId}/expiring-contracts`);
+export const getFranchiseTagCost = (leagueId: string, position: string, season: number) =>
+  api.get<{ data: { position: string; tag_salary: number; calculation: string } }>(`/api/leagues/${leagueId}/franchise-tags/${season}/${position}`);
+export const releaseExpiringPlayer = (contractId: string) =>
+  api.post(`/api/contracts/${contractId}/release`, { release_reason: 'expired' });
+export const getTeamFranchiseTagUsage = (teamId: string, season: number) =>
+  api.get<{ data: { has_used: boolean; tagged_player?: any } }>(`/api/teams/${teamId}/franchise-tag-usage/${season}`);
 
 // Trade History
 export interface TradeHistoryItem {
