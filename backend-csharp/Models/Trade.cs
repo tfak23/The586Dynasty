@@ -131,7 +131,7 @@ public class TradeAsset
     public decimal? CapAmount { get; set; }
 
     [Column("cap_year")]
-    public int? CapYear { get; set; } = 2026;
+    public int? CapYear { get; set; }
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

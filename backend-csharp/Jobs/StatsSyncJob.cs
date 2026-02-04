@@ -62,15 +62,11 @@ public class StatsSyncJob : IHostedService, IDisposable
     {
         using var scope = _serviceProvider.CreateScope();
         var statsSync = scope.ServiceProvider.GetRequiredService<StatsSyncService>();
+        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
-        // Get current season (would typically come from config or database)
-        var currentSeason = DateTime.UtcNow.Year;
-
-        // If we're in the off-season (Feb-Aug), sync previous season
-        if (DateTime.UtcNow.Month >= 2 && DateTime.UtcNow.Month <= 8)
-        {
-            currentSeason--;
-        }
+        // Get current season from configuration, default to current year if not set
+        var currentSeason = configuration.GetValue<int?>("LeagueConfiguration:CurrentSeason") 
+            ?? DateTime.UtcNow.Year;
 
         var result = await statsSync.SyncPlayerStatsAsync(currentSeason);
 
