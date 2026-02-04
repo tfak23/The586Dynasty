@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:Mobile.CSharp.ViewModels"
+             x:Class="Mobile.CSharp.Views.BuyInsPage"
+             x:DataType="vm:BuyInsViewModel"
+             Title="{Binding Title}">
+
+    <Grid RowDefinitions="Auto,*" Padding="10">
+        
+        <!-- Error Message -->
+        <Frame Grid.Row="0" 
+               IsVisible="{Binding HasError}"
+               BackgroundColor="LightCoral"
+               Margin="0,0,0,10">
+            <Label Text="{Binding ErrorMessage}" 
+                   TextColor="White"
+                   FontAttributes="Bold"/>
+        </Frame>
+
+        <!-- Main Content -->
+        <CollectionView Grid.Row="1" ItemsSource="{Binding BuyIns}">
+            <CollectionView.EmptyView>
+                <StackLayout Padding="20" VerticalOptions="Center">
+                    <Label Text="No buy-ins found"
+                           FontSize="18"
+                           HorizontalOptions="Center"/>
+                </StackLayout>
+            </CollectionView.EmptyView>
+            
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Frame Margin="5" Padding="15" BorderColor="Gray">
+                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                            <Label Grid.Row="0" Grid.Column="0"
+                                   Text="{Binding Season, StringFormat='Season {0}'}"
+                                   FontSize="20"
+                                   FontAttributes="Bold"/>
+                            
+                            <Label Grid.Row="1" Grid.Column="0"
+                                   Text="{Binding Amount, StringFormat='Amount: ${0:F2}'}"
+                                   FontSize="16"/>
+                            
+                            <Label Grid.Row="2" Grid.Column="0"
+                                   Text="{Binding DueDate, StringFormat='Due: {0:MMM dd, yyyy}'}"
+                                   FontSize="14"
+                                   TextColor="Gray"/>
+                            
+                            <Label Grid.Row="0" Grid.Column="1" Grid.RowSpan="3"
+                                   Text="{Binding IsPaid, Converter={StaticResource BoolToStatusConverter}}"
+                                   FontSize="16"
+                                   FontAttributes="Bold"
+                                   VerticalOptions="Center"/>
+                        </Grid>
+                    </Frame>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+    </Grid>
+
+</ContentPage>

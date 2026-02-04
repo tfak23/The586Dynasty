@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:Mobile.CSharp.ViewModels"
+             x:Class="Mobile.CSharp.Views.LeagueHistoryPage"
+             x:DataType="vm:LeagueHistoryViewModel"
+             Title="{Binding Title}">
+
+    <Grid RowDefinitions="Auto,*" Padding="10">
+        
+        <!-- Error Message -->
+        <Frame Grid.Row="0" 
+               IsVisible="{Binding HasError}"
+               BackgroundColor="LightCoral"
+               Margin="0,0,0,10">
+            <Label Text="{Binding ErrorMessage}" 
+                   TextColor="White"
+                   FontAttributes="Bold"/>
+        </Frame>
+
+        <!-- Main Content -->
+        <RefreshView Grid.Row="1"
+                     Command="{Binding LoadLeaguesCommand}"
+                     IsRefreshing="{Binding IsBusy}">
+            <CollectionView ItemsSource="{Binding Leagues}"
+                           SelectionMode="Single"
+                           SelectedItem="{Binding SelectedLeague}"
+                           SelectionChangedCommand="{Binding SelectLeagueCommand}"
+                           SelectionChangedCommandParameter="{Binding SelectedLeague}">
+                <CollectionView.EmptyView>
+                    <StackLayout Padding="20" VerticalOptions="Center">
+                        <Label Text="No leagues found"
+                               FontSize="18"
+                               HorizontalOptions="Center"/>
+                        <Button Text="Refresh"
+                                Command="{Binding LoadLeaguesCommand}"
+                                HorizontalOptions="Center"
+                                Margin="0,10,0,0"/>
+                    </StackLayout>
+                </CollectionView.EmptyView>
+                
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame Margin="5" Padding="10" BorderColor="Gray">
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                                <Label Grid.Row="0" Grid.Column="0"
+                                       Text="{Binding Name}"
+                                       FontSize="20"
+                                       FontAttributes="Bold"/>
+                                
+                                <Label Grid.Row="1" Grid.Column="0"
+                                       Text="{Binding CurrentSeason, StringFormat='Season: {0}'}"
+                                       FontSize="14"/>
+                                
+                                <Label Grid.Row="2" Grid.Column="0"
+                                       Text="{Binding SalaryCap, StringFormat='Salary Cap: ${0:F2}'}"
+                                       FontSize="14"/>
+                                
+                                <Label Grid.Row="0" Grid.Column="1" Grid.RowSpan="3"
+                                       Text="→"
+                                       FontSize="24"
+                                       VerticalOptions="Center"/>
+                            </Grid>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+    </Grid>
+
+</ContentPage>

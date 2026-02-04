@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell
+    x:Class="Mobile.CSharp.AppShell"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:local="clr-namespace:Mobile.CSharp"
+    xmlns:views="clr-namespace:Mobile.CSharp.Views"
+    Shell.FlyoutBehavior="Flyout">
+
+    <!-- Main Tab Bar -->
+    <TabBar>
+        <ShellContent
+            Title="Home"
+            Icon="home.png"
+            ContentTemplate="{DataTemplate local:MainPage}"
+            Route="main" />
+
+        <ShellContent
+            Title="League"
+            Icon="league.png"
+            ContentTemplate="{DataTemplate views:LeagueHistoryPage}"
+            Route="leaguehistory" />
+
+        <ShellContent
+            Title="Teams"
+            Icon="team.png"
+            ContentTemplate="{DataTemplate views:TeamPage}"
+            Route="teams" />
+
+        <ShellContent
+            Title="Trades"
+            Icon="trade.png"
+            ContentTemplate="{DataTemplate views:TradePage}"
+            Route="trades" />
+    </TabBar>
+
+    <!-- Flyout Menu Items -->
+    <FlyoutItem Title="League Info" Icon="info.png">
+        <ShellContent
+            Title="League History"
+            ContentTemplate="{DataTemplate views:LeagueHistoryPage}"
+            Route="leaguehistory" />
+        <ShellContent
+            Title="Rules"
+            ContentTemplate="{DataTemplate views:RulesPage}"
+            Route="rules" />
+        <ShellContent
+            Title="Buy-Ins"
+            ContentTemplate="{DataTemplate views:BuyInsPage}"
+            Route="buyins" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Team Management" Icon="team.png">
+        <ShellContent
+            Title="My Team"
+            ContentTemplate="{DataTemplate views:TeamPage}"
+            Route="team" />
+        <ShellContent
+            Title="Contracts"
+            ContentTemplate="{DataTemplate views:ContractPage}"
+            Route="contracts" />
+        <ShellContent
+            Title="Free Agents"
+            ContentTemplate="{DataTemplate views:FreeAgentPage}"
+            Route="freeagents" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Commissioner" Icon="admin.png">
+        <ShellContent
+            Title="Commissioner Tools"
+            ContentTemplate="{DataTemplate views:CommissionerPage}"
+            Route="commissioner" />
+    </FlyoutItem>
+
+</Shell>

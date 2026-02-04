@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:Mobile.CSharp.ViewModels"
+             x:Class="Mobile.CSharp.Views.RulesPage"
+             x:DataType="vm:RulesViewModel"
+             Title="{Binding Title}">
+
+    <Grid RowDefinitions="Auto,*" Padding="10">
+        
+        <!-- Error Message -->
+        <Frame Grid.Row="0" 
+               IsVisible="{Binding HasError}"
+               BackgroundColor="LightCoral"
+               Margin="0,0,0,10">
+            <Label Text="{Binding ErrorMessage}" 
+                   TextColor="White"
+                   FontAttributes="Bold"/>
+        </Frame>
+
+        <!-- Main Content -->
+        <RefreshView Grid.Row="1"
+                     Command="{Binding LoadRulesCommand}"
+                     IsRefreshing="{Binding IsBusy}">
+            <CollectionView ItemsSource="{Binding Rules}">
+                <CollectionView.EmptyView>
+                    <StackLayout Padding="20" VerticalOptions="Center">
+                        <Label Text="No rules available"
+                               FontSize="18"
+                               HorizontalOptions="Center"/>
+                        <Button Text="Refresh"
+                                Command="{Binding LoadRulesCommand}"
+                                HorizontalOptions="Center"
+                                Margin="0,10,0,0"/>
+                    </StackLayout>
+                </CollectionView.EmptyView>
+                
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame Margin="5" Padding="15" BorderColor="Gray">
+                            <StackLayout Spacing="5">
+                                <Label Text="{Binding Category}"
+                                       FontSize="12"
+                                       TextColor="Gray"
+                                       FontAttributes="Italic"/>
+                                
+                                <Label Text="{Binding Title}"
+                                       FontSize="18"
+                                       FontAttributes="Bold"/>
+                                
+                                <Label Text="{Binding Description}"
+                                       FontSize="14"
+                                       LineBreakMode="WordWrap"/>
+                            </StackLayout>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+    </Grid>
+
+</ContentPage>

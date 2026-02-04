@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:Mobile.CSharp.ViewModels"
+             x:Class="Mobile.CSharp.Views.CommissionerPage"
+             x:DataType="vm:CommissionerViewModel"
+             Title="{Binding Title}">
+
+    <ScrollView Padding="20">
+        <VerticalStackLayout Spacing="15">
+            
+            <Label Text="Commissioner Tools"
+                   FontSize="28"
+                   FontAttributes="Bold"
+                   HorizontalOptions="Center"
+                   Margin="0,0,0,20"/>
+
+            <!-- Roster Management -->
+            <Frame Padding="15" BorderColor="Gray">
+                <StackLayout Spacing="10">
+                    <Label Text="Roster Management"
+                           FontSize="20"
+                           FontAttributes="Bold"/>
+                    <Label Text="Manage team rosters, add/remove players, and adjust lineups"
+                           FontSize="14"
+                           TextColor="Gray"/>
+                    <Button Text="Manage Rosters"
+                            Command="{Binding NavigateToRosterManagementCommand}"
+                            BackgroundColor="#2196F3"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Cap Management -->
+            <Frame Padding="15" BorderColor="Gray">
+                <StackLayout Spacing="10">
+                    <Label Text="Salary Cap Management"
+                           FontSize="20"
+                           FontAttributes="Bold"/>
+                    <Label Text="View and adjust salary caps, manage cap penalties"
+                           FontSize="14"
+                           TextColor="Gray"/>
+                    <Button Text="Manage Cap"
+                            Command="{Binding NavigateToCapManagementCommand}"
+                            BackgroundColor="#4CAF50"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Trade Management -->
+            <Frame Padding="15" BorderColor="Gray">
+                <StackLayout Spacing="10">
+                    <Label Text="Trade Management"
+                           FontSize="20"
+                           FontAttributes="Bold"/>
+                    <Label Text="Review and approve trades, manage trade disputes"
+                           FontSize="14"
+                           TextColor="Gray"/>
+                    <Button Text="Manage Trades"
+                            Command="{Binding NavigateToTradeManagementCommand}"
+                            BackgroundColor="#FF9800"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Commissioner Status -->
+            <Frame Padding="15" BorderColor="LightGray" Margin="0,20,0,0">
+                <HorizontalStackLayout Spacing="10" HorizontalOptions="Center">
+                    <Label Text="Commissioner Status:"
+                           FontSize="14"
+                           VerticalOptions="Center"/>
+                    <Label Text="{Binding IsCommissioner, Converter={StaticResource BoolToYesNoConverter}}"
+                           FontSize="14"
+                           FontAttributes="Bold"
+                           VerticalOptions="Center"/>
+                </HorizontalStackLayout>
+            </Frame>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

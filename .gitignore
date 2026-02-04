@@ -50,6 +50,19 @@ desktop.ini
 coverage/
 
 # ======================
+# .NET / C#
+# ======================
+bin/
+obj/
+*.dll
+*.pdb
+*.cache
+*.props
+*.targets
+*.user
+*.suo
+
+# ======================
 # Misc
 # ======================
 .cache/

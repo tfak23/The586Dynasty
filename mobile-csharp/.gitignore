@@ -1,0 +1,135 @@
+# .NET MAUI specific
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userprefs
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio cache/options
+.vs/
+*.cache
+*.dll
+*.exe
+*.pdb
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp
+*.tmp_proj
+*_wpftmp.csproj
+*.log
+*.vspscc
+*.vssscc
+.builds
+*.pidb
+*.svclog
+*.scc
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Platform specific
+# Android
+[Aa]ndroid/[Bb]in/
+[Aa]ndroid/[Oo]bj/
+
+# iOS
+[Ii]OS/[Bb]in/
+[Ii]OS/[Oo]bj/
+
+# Mac Catalyst
+[Mm]ac[Cc]atalyst/[Bb]in/
+[Mm]ac[Cc]atalyst/[Oo]bj/
+
+# Windows
+[Ww]indows/[Bb]in/
+[Ww]indows/[Oo]bj/
+
+# Rider
+.idea/
+*.sln.iml
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# NuGet
+*.nupkg
+**/packages/*
+!**/packages/build/
+*.nuget.props
+*.nuget.targets
+
+# Microsoft Azure Build Output
+csx/
+*.build.csdef
+
+# Others
+ClientBin/
+~$*
+*~
+*.dbmdl
+*.dbproj.schemaview
+*.jfm
+*.pfx
+*.publishsettings
+orleans.codegen.cs
+
+# Backup & report files
+_UpgradeReport_Files/
+Backup*/
+UpgradeLog*.XML
+UpgradeLog*.htm
+ServiceFabricBackup/
+*.rptproj.bak
+
+# Microsoft Fakes
+FakesAssemblies/
+
+# AppPackages
+AppPackages/
+BundleArtifacts/
+Package.StoreAssociation.xml
+_pkginfo.txt
+*.appx
+*.appxbundle
+*.appxupload
+
+# Generated files
+*_h.h
+*.ilk
+*.meta
+*.iobj
+*.ipdb
+*.exp
+*.lib
