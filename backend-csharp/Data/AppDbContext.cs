@@ -23,6 +23,7 @@ public class AppDbContext : DbContext
     public DbSet<CapTransaction> CapTransactions { get; set; }
     public DbSet<ExpiredContract> ExpiredContracts { get; set; }
     public DbSet<SyncLog> SyncLogs { get; set; }
+    public DbSet<PlayerSeasonStat> PlayerSeasonStats { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -80,6 +81,16 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<TradeHistory>()
             .HasIndex(t => new { t.Team1Id, t.Team2Id });
+
+        modelBuilder.Entity<PlayerSeasonStat>()
+            .HasIndex(p => new { p.PlayerId, p.Season })
+            .IsUnique();
+
+        modelBuilder.Entity<PlayerSeasonStat>()
+            .HasIndex(p => new { p.Season, p.TotalFantasyPoints });
+
+        modelBuilder.Entity<PlayerSeasonStat>()
+            .HasIndex(p => new { p.Season, p.AvgPointsPerGame });
 
         // Configure decimal precision
         modelBuilder.Entity<League>()

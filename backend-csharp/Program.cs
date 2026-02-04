@@ -1,6 +1,7 @@
 using Backend.CSharp.Data;
 using Backend.CSharp.Jobs;
 using Backend.CSharp.Middleware;
+using Backend.CSharp.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -41,8 +42,14 @@ builder.Services.AddCors(options =>
 // HttpClient for external API calls (Sleeper)
 builder.Services.AddHttpClient();
 
+// Services
+builder.Services.AddScoped<StatsSyncService>();
+builder.Services.AddScoped<ContractEstimatorService>();
+builder.Services.AddScoped<ContractEvaluatorService>();
+
 // Background Jobs
 builder.Services.AddHostedService<RosterSyncJob>();
+builder.Services.AddHostedService<StatsSyncJob>();
 
 // Swagger/OpenAPI
 builder.Services.AddEndpointsApiExplorer();
@@ -113,6 +120,7 @@ app.Logger.LogInformation("   Environment: {Environment}", app.Environment.Envir
 app.Logger.LogInformation("   Current Season: {Season}", currentSeason);
 app.Logger.LogInformation("   Database: PostgreSQL");
 app.Logger.LogInformation("   ⏰ Roster sync: every 5 minutes");
+app.Logger.LogInformation("   📊 Stats sync: Tuesdays at 6 AM");
 app.Logger.LogInformation("   Swagger UI: {Url}", app.Environment.IsDevelopment() ? "http://localhost:5000" : "disabled");
 
 app.Run();

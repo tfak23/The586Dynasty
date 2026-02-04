@@ -7,12 +7,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="CsvHelper" Version="30.0.1" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.23" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="8.0.0" />
+    <PackageReference Include="NCrontab" Version="3.3.3" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
   </ItemGroup>
