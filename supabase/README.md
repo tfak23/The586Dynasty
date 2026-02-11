@@ -23,6 +23,19 @@ This directory contains the database schema and configuration for deploying The 
    - See `rls-policies.sql` for security policies
    - For now, the app allows all operations
 
+## Important: Schema Maintenance
+
+⚠️ **Year Constraints**: The schema includes hardcoded year constraints (2026-2030) in the `cap_adjustments` table. These will need to be updated as seasons progress.
+
+**To update year constraints:**
+```sql
+-- When moving to 2031 season, run:
+ALTER TABLE cap_adjustments ADD COLUMN amount_2031 DECIMAL(10,2) DEFAULT 0.00;
+-- Or update the CHECK constraint to allow newer years
+```
+
+We recommend updating these constraints at the start of each new season.
+
 ## Schema Overview
 
 The database includes the following main tables:

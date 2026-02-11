@@ -8,6 +8,11 @@ import { google } from 'googleapis';
 // Get API key from environment
 const GOOGLE_DOCS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_DOCS_API_KEY || '';
 
+// Validate API key on module load
+if (!GOOGLE_DOCS_API_KEY) {
+  console.warn('⚠️ EXPO_PUBLIC_GOOGLE_DOCS_API_KEY not set. Google Docs functionality will be unavailable.');
+}
+
 // Initialize Google Docs API client
 const docs = google.docs({
   version: 'v1',
@@ -20,6 +25,13 @@ const docs = google.docs({
  * @returns The document content as structured data
  */
 export const readGoogleDoc = async (documentId: string) => {
+  if (!GOOGLE_DOCS_API_KEY) {
+    return {
+      success: false,
+      error: 'Google Docs API key not configured. Please set EXPO_PUBLIC_GOOGLE_DOCS_API_KEY.'
+    };
+  }
+
   try {
     const response = await docs.documents.get({
       documentId,
