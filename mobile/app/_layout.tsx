@@ -1,10 +1,11 @@
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { colors } from '@/lib/theme';
 import { useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { api } from '@/lib/api';
+import { AuthProvider, useAuth } from '@/lib/AuthContext';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -47,9 +48,34 @@ function LeagueLoader() {
   return null;
 }
 
-export default function RootLayout() {
+// Protected navigation - handles auth routing
+function ProtectedNavigation() {
+  const { user, profile, loading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (loading) return;
+
+    const inAuthGroup = segments[0] === 'auth';
+    const inOnboarding = segments[0] === 'onboarding';
+
+    // Redirect to login if not authenticated
+    if (!user && !inAuthGroup) {
+      router.replace('/auth/login');
+    } 
+    // Redirect to link Sleeper if authenticated but no Sleeper account
+    else if (user && !profile?.sleeper_username && !inOnboarding) {
+      router.replace('/onboarding/link-sleeper');
+    } 
+    // Redirect to select league if in auth pages but already authenticated
+    else if (user && profile?.sleeper_username && inAuthGroup) {
+      router.replace('/onboarding/select-league');
+    }
+  }, [user, profile, loading, segments]);
+
   return (
-    <QueryClientProvider client={queryClient}>
+    <>
       <LeagueLoader />
       <StatusBar style="light" />
       <Stack
@@ -68,6 +94,26 @@ export default function RootLayout() {
       >
         <Stack.Screen 
           name="(tabs)" 
+          options={{ headerShown: false }} 
+        />
+        <Stack.Screen 
+          name="auth/login" 
+          options={{ headerShown: false }} 
+        />
+        <Stack.Screen 
+          name="auth/signup" 
+          options={{ headerShown: false }} 
+        />
+        <Stack.Screen 
+          name="auth/forgot-password" 
+          options={{ headerShown: false }} 
+        />
+        <Stack.Screen 
+          name="onboarding/link-sleeper" 
+          options={{ headerShown: false }} 
+        />
+        <Stack.Screen 
+          name="onboarding/select-league" 
           options={{ headerShown: false }} 
         />
         <Stack.Screen 
@@ -99,6 +145,16 @@ export default function RootLayout() {
           }} 
         />
       </Stack>
-    </QueryClientProvider>
+    </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <QueryClientProvider client={queryClient}>
+        <ProtectedNavigation />
+      </QueryClientProvider>
+    </AuthProvider>
   );
 }
