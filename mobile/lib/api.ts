@@ -11,14 +11,38 @@ export const api = axios.create({
   },
 });
 
+// Request interceptor to add auth token
+api.interceptors.request.use(
+  async (config) => {
+    // Dynamically import to avoid circular dependency
+    const { useAuthStore } = await import('./authStore.js');
+    const token = useAuthStore.getState().token;
+    
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response) {
+      // Handle 401 unauthorized - logout user
+      if (error.response.status === 401) {
+        const { useAuthStore } = await import('./authStore.js');
+        await useAuthStore.getState().logout();
+      }
+      
       // Server responded with error
       console.error('API Error:', error.response.data);
-      throw new Error(error.response.data.message || 'An error occurred');
+      throw new Error(error.response.data.error || error.response.data.message || 'An error occurred');
     } else if (error.request) {
       // Request made but no response
       console.error('Network Error:', error.request);
@@ -493,5 +517,81 @@ export const initializeBuyIns = (leagueId: string, season: number, amountDue?: n
     `/api/leagues/${leagueId}/buy-ins/initialize`,
     { season, amount_due: amountDue }
   );
+
+// =============================================
+// AUTHENTICATION
+// =============================================
+export interface AuthResponse {
+  success: boolean;
+  data: {
+    user: {
+      id: string;
+      email: string;
+      display_name: string;
+      avatar_url?: string;
+      has_sleeper_account: boolean;
+      sleeper_username?: string;
+    };
+    token: string;
+  };
+}
+
+export interface UserLeague {
+  sleeper_league_id: string;
+  name: string;
+  season: string;
+  total_rosters: number;
+  status: string;
+  is_registered: boolean;
+  is_salary_cap_league: boolean;
+  app_league_id?: string;
+  user_status: 'joined' | 'not_joined';
+  action: 'already_joined' | 'join_league' | 'convert_to_salary_cap';
+}
+
+export const register = (email: string, password: string, display_name?: string) =>
+  api.post<AuthResponse>('/api/auth/register', { email, password, display_name });
+
+export const login = (email: string, password: string) =>
+  api.post<AuthResponse>('/api/auth/login', { email, password });
+
+export const googleAuth = (idToken: string) =>
+  api.post<AuthResponse>('/api/auth/google', { idToken });
+
+export const forgotPassword = (email: string) =>
+  api.post<{ success: boolean; message: string }>('/api/auth/forgot-password', { email });
+
+export const resetPassword = (token: string, newPassword: string) =>
+  api.post<{ success: boolean; message: string }>('/api/auth/reset-password', { token, newPassword });
+
+export const getCurrentUser = () =>
+  api.get<{ success: boolean; data: any }>('/api/auth/me');
+
+export const linkSleeperAccount = (username: string) =>
+  api.post<{ success: boolean; data: any }>('/api/auth/link-sleeper', { username });
+
+// =============================================
+// USER LEAGUES
+// =============================================
+export const discoverLeagues = (season?: string) =>
+  api.get<{ success: boolean; data: { season: string; sleeper_user_id: string; leagues: UserLeague[] } }>(
+    '/api/user-leagues/discover',
+    { params: { season } }
+  );
+
+export const convertLeague = (sleeper_league_id: string) =>
+  api.post<{ success: boolean; message: string; data: any }>(
+    '/api/user-leagues/convert',
+    { sleeper_league_id }
+  );
+
+export const joinLeague = (sleeper_league_id: string) =>
+  api.post<{ success: boolean; message: string; data: any }>(
+    '/api/user-leagues/join',
+    { sleeper_league_id }
+  );
+
+export const getMyLeagues = () =>
+  api.get<{ success: boolean; data: any[] }>('/api/user-leagues/my-leagues');
 
 export default api;

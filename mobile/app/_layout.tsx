@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { colors } from '@/lib/theme';
 import { useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
+import { useAuthStore } from '@/lib/authStore';
 import { api } from '@/lib/api';
+import { router } from 'expo-router';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -15,11 +17,26 @@ const queryClient = new QueryClient({
   },
 });
 
-// Component to auto-load league on startup
-function LeagueLoader() {
+// Component to initialize auth and auto-load league
+function AppInitializer() {
   const { currentLeague, setCurrentLeague, setTeams } = useAppStore();
+  const { isAuthenticated, isInitializing, initialize } = useAuthStore();
 
   useEffect(() => {
+    // Initialize auth state from storage
+    initialize();
+  }, []);
+
+  useEffect(() => {
+    if (isInitializing) return;
+
+    // Redirect to login if not authenticated
+    if (!isAuthenticated) {
+      router.replace('/(auth)/login');
+      return;
+    }
+
+    // Load league if authenticated
     const loadLeague = async () => {
       // Skip if league already loaded
       if (currentLeague) return;
@@ -42,7 +59,7 @@ function LeagueLoader() {
     };
 
     loadLeague();
-  }, [currentLeague, setCurrentLeague, setTeams]);
+  }, [isInitializing, isAuthenticated, currentLeague, setCurrentLeague, setTeams]);
 
   return null;
 }
@@ -50,7 +67,7 @@ function LeagueLoader() {
 export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
-      <LeagueLoader />
+      <AppInitializer />
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -66,6 +83,10 @@ export default function RootLayout() {
           },
         }}
       >
+        <Stack.Screen 
+          name="(auth)" 
+          options={{ headerShown: false }} 
+        />
         <Stack.Screen 
           name="(tabs)" 
           options={{ headerShown: false }} 
