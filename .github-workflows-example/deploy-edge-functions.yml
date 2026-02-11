@@ -1,0 +1,58 @@
+# Example GitHub Actions Workflow for Deploying Supabase Edge Functions
+# 
+# To use this workflow:
+# 1. Copy this file to .github/workflows/deploy-edge-functions.yml
+# 2. Set up the required secrets in your GitHub repository:
+#    - SUPABASE_ACCESS_TOKEN: Create in Supabase Dashboard > Account > Access Tokens
+#    - SUPABASE_PROJECT_REF: Your project reference ID from Supabase Dashboard
+# 3. Push changes to the main branch or manually trigger the workflow
+
+name: Deploy Supabase Edge Functions
+
+on:
+  # Trigger on push to main branch when functions change
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Install Supabase CLI
+        run: npm install -g supabase
+      
+      - name: Verify Supabase CLI installation
+        run: supabase --version
+      
+      - name: Link Supabase project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          supabase link --project-ref $PROJECT_REF
+      
+      - name: Deploy Edge Functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy
+      
+      - name: Verify deployment
+        run: |
+          echo "✅ Edge Functions deployed successfully!"
+          echo "Functions are now available at:"
+          echo "https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1/"

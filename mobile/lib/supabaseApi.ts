@@ -270,5 +270,28 @@ export const advanceSeason = async (leagueId: string, commissionerTeamId: string
   return callEdgeFunction('advance-season', { leagueId, commissionerTeamId });
 };
 
+// =============================================
+// GOOGLE DOCS API (Secure via Edge Function)
+// =============================================
+
+/**
+ * Read a Google Doc securely via Supabase Edge Function
+ * This prevents exposing the API key on the client side
+ * @param documentId - The Google Doc ID
+ * @param operation - Type of operation: 'read', 'extractText', or 'parseTable'
+ * @returns The document data
+ */
+export const readGoogleDocSecure = async (
+  documentId: string,
+  operation: 'read' | 'extractText' | 'parseTable' = 'read'
+) => {
+  const { data, error } = await supabase.functions.invoke('google-docs-read', {
+    body: { documentId, operation }
+  });
+  
+  if (error) throw error;
+  return data;
+};
+
 // Re-export for backward compatibility
 export * from './api';
