@@ -11,6 +11,10 @@ This document summarizes the security measures implemented in the authentication
 - **Final Scan**: 0 alerts ✅
 - **Status**: All vulnerabilities resolved
 
+### Dependency Vulnerabilities
+- **nodemailer**: Updated from 6.9.8 to 7.0.7 (fixes CVE: Email to unintended domain)
+- **Status**: All known vulnerabilities patched ✅
+
 ## Security Features Implemented
 
 ### 1. Rate Limiting ✅
