@@ -36,6 +36,7 @@ export default function ProjectionsScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Cap Projections</Text>
         <Text style={styles.subtitle}>{currentTeam.team_name}</Text>
+        <Text style={styles.capInfo}>Salary Cap: ${salaryCap}</Text>
       </View>
 
       {/* 5-Year Chart (simplified bars) */}
@@ -103,7 +104,13 @@ export default function ProjectionsScreen() {
               
               <View style={styles.yearDetails}>
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Committed Salary</Text>
+                  <Text style={styles.detailLabel}>Guaranteed (dead cap if cut)</Text>
+                  <Text style={[styles.detailValue, { color: colors.warning }]}>
+                    ${(year.guaranteed_salary || 0).toFixed(2)}
+                  </Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Player Contracts ({year.contract_count})</Text>
                   <Text style={styles.detailValue}>${year.committed_salary.toFixed(2)}</Text>
                 </View>
                 <View style={styles.detailRow}>
@@ -114,11 +121,7 @@ export default function ProjectionsScreen() {
                 </View>
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Total Cap Used</Text>
-                  <Text style={styles.detailValue}>${year.total_cap_used.toFixed(2)}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Contracts</Text>
-                  <Text style={styles.detailValue}>{year.contract_count}</Text>
+                  <Text style={[styles.detailValue, { fontWeight: 'bold' }]}>${year.total_cap_used.toFixed(2)}</Text>
                 </View>
               </View>
               
@@ -200,6 +203,12 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     color: colors.textSecondary,
     marginTop: spacing.xs,
+  },
+  capInfo: {
+    fontSize: fontSize.sm,
+    color: colors.primary,
+    marginTop: spacing.xs,
+    fontWeight: '600',
   },
   chartContainer: {
     padding: spacing.md,

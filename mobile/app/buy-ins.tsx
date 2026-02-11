@@ -1,20 +1,24 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl, Modal, TextInput, Alert, Platform } from 'react-native';
 import { useState, useCallback } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
-import { getLeagueBuyIns, getBuyInSeasons, getLeague } from '@/lib/api';
+import { getLeagueBuyIns, getBuyInSeasons, getLeague, updateBuyIn, initializeBuyIns } from '@/lib/api';
 import { useAppStore } from '@/lib/store';
 
 export default function BuyInsScreen() {
   const { leagueId: paramLeagueId } = useLocalSearchParams<{ leagueId: string }>();
-  const { currentLeagueId } = useAppStore();
-  const leagueId = paramLeagueId || currentLeagueId;
+  const { currentLeague } = useAppStore();
+  const leagueId = paramLeagueId || currentLeague?.id;
   const queryClient = useQueryClient();
 
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [editingBuyIn, setEditingBuyIn] = useState<any | null>(null);
+  const [editAmountDue, setEditAmountDue] = useState('');
+  const [editAmountPaid, setEditAmountPaid] = useState('');
+  const { currentTeam } = useAppStore();
 
   const { data: league } = useQuery({
     queryKey: ['league', leagueId],
@@ -50,6 +54,85 @@ export default function BuyInsScreen() {
     await queryClient.invalidateQueries({ queryKey: ['buyIns', leagueId] });
     setRefreshing(false);
   }, [queryClient, leagueId]);
+
+  // Check if current user is commissioner (using settings.commissionerTeamIds)
+  const { settings } = useAppStore();
+  const isCommissioner = currentTeam && settings.commissionerTeamIds?.includes(currentTeam.id);
+
+  const initializeMutation = useMutation({
+    mutationFn: async () => {
+      return initializeBuyIns(leagueId!, effectiveSeason, 100); // Default $100 buy-in
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['buyIns', leagueId] });
+      queryClient.invalidateQueries({ queryKey: ['buyInSeasons', leagueId] });
+      if (Platform.OS === 'web') {
+        (globalThis as any).alert('Buy-ins initialized for ' + effectiveSeason + ' season');
+      } else {
+        Alert.alert('Success', 'Buy-ins initialized for ' + effectiveSeason + ' season');
+      }
+    },
+    onError: (error: any) => {
+      if (Platform.OS === 'web') {
+        (globalThis as any).alert(error.message || 'Failed to initialize buy-ins');
+      } else {
+        Alert.alert('Error', error.message || 'Failed to initialize buy-ins');
+      }
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ buyInId, data }: { buyInId: string; data: any }) => {
+      return updateBuyIn(leagueId!, buyInId, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['buyIns', leagueId] });
+      setEditingBuyIn(null);
+      if (Platform.OS === 'web') {
+        (globalThis as any).alert('Buy-in updated successfully');
+      } else {
+        Alert.alert('Success', 'Buy-in updated successfully');
+      }
+    },
+    onError: (error: any) => {
+      if (Platform.OS === 'web') {
+        (globalThis as any).alert(error.message || 'Failed to update buy-in');
+      } else {
+        Alert.alert('Error', error.message || 'Failed to update buy-in');
+      }
+    },
+  });
+
+  const handleEditBuyIn = (buyIn: any) => {
+    setEditingBuyIn(buyIn);
+    setEditAmountDue(String(buyIn.amount_due));
+    setEditAmountPaid(String(buyIn.amount_paid));
+  };
+
+  const handleSaveBuyIn = () => {
+    if (!editingBuyIn) return;
+
+    const amountDue = parseFloat(editAmountDue) || 0;
+    const amountPaid = parseFloat(editAmountPaid) || 0;
+
+    // Determine status based on amounts
+    let status = 'unpaid';
+    if (amountPaid >= amountDue) {
+      status = 'paid';
+    } else if (amountPaid > 0) {
+      status = 'partial';
+    }
+
+    updateMutation.mutate({
+      buyInId: editingBuyIn.id,
+      data: {
+        amount_due: amountDue,
+        amount_paid: amountPaid,
+        status,
+        paid_date: amountPaid > 0 ? new Date().toISOString() : null,
+      },
+    });
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -202,62 +285,182 @@ export default function BuyInsScreen() {
             <Text style={styles.emptySubtext}>
               Commissioner can initialize buy-ins for this season
             </Text>
+            {isCommissioner && (
+              <TouchableOpacity
+                style={styles.initializeButton}
+                onPress={() => initializeMutation.mutate()}
+                disabled={initializeMutation.isPending}
+              >
+                <Ionicons name="add-circle-outline" size={20} color={colors.white} />
+                <Text style={styles.initializeButtonText}>
+                  {initializeMutation.isPending ? 'Initializing...' : `Initialize ${effectiveSeason} Buy-Ins`}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
-          buyIns.map((buyIn) => (
-            <View key={buyIn.id} style={styles.buyInCard}>
-              <View style={styles.buyInHeader}>
-                <View style={styles.buyInInfo}>
-                  <Text style={styles.ownerName}>{buyIn.owner_name}</Text>
-                  {buyIn.team_name && (
-                    <Text style={styles.teamName}>{buyIn.team_name}</Text>
-                  )}
-                </View>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(buyIn.status) + '20' }]}>
-                  <Ionicons name={getStatusIcon(buyIn.status)} size={14} color={getStatusColor(buyIn.status)} />
-                  <Text style={[styles.statusText, { color: getStatusColor(buyIn.status) }]}>
-                    {buyIn.status.charAt(0).toUpperCase() + buyIn.status.slice(1)}
-                  </Text>
-                </View>
-              </View>
+          buyIns.map((buyIn) => {
+            const progressPercent = buyIn.amount_due > 0
+              ? Math.min((buyIn.amount_paid / buyIn.amount_due) * 100, 100)
+              : 0;
 
-              <View style={styles.buyInDetails}>
-                <View style={styles.amountRow}>
-                  <Text style={styles.amountLabel}>Due</Text>
-                  <Text style={styles.amountValue}>${buyIn.amount_due}</Text>
+            return (
+              <View key={buyIn.id} style={styles.buyInCard}>
+                <View style={styles.buyInHeader}>
+                  <View style={styles.buyInInfo}>
+                    <Text style={styles.ownerName}>{buyIn.owner_name}</Text>
+                    {buyIn.team_name && (
+                      <Text style={styles.teamName}>{buyIn.team_name}</Text>
+                    )}
+                  </View>
+                  <View style={styles.headerActions}>
+                    {isCommissioner && (
+                      <TouchableOpacity
+                        style={styles.editButton}
+                        onPress={() => handleEditBuyIn(buyIn)}
+                      >
+                        <Ionicons name="pencil" size={16} color={colors.primary} />
+                      </TouchableOpacity>
+                    )}
+                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(buyIn.status) + '20' }]}>
+                      <Ionicons name={getStatusIcon(buyIn.status)} size={14} color={getStatusColor(buyIn.status)} />
+                      <Text style={[styles.statusText, { color: getStatusColor(buyIn.status) }]}>
+                        {buyIn.status.charAt(0).toUpperCase() + buyIn.status.slice(1)}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
-                <View style={styles.amountRow}>
-                  <Text style={styles.amountLabel}>Paid</Text>
-                  <Text style={[styles.amountValue, buyIn.amount_paid > 0 && { color: colors.success }]}>
-                    ${buyIn.amount_paid}
+
+                {/* Individual Progress Bar */}
+                <View style={styles.individualProgress}>
+                  <View style={styles.individualProgressBar}>
+                    <View
+                      style={[
+                        styles.individualProgressFill,
+                        {
+                          width: `${progressPercent}%`,
+                          backgroundColor: getStatusColor(buyIn.status),
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.individualProgressText}>
+                    {progressPercent.toFixed(0)}%
                   </Text>
                 </View>
-                {buyIn.amount_due - buyIn.amount_paid > 0 && (
+
+                <View style={styles.buyInDetails}>
                   <View style={styles.amountRow}>
-                    <Text style={styles.amountLabel}>Remaining</Text>
-                    <Text style={[styles.amountValue, { color: colors.error }]}>
-                      ${buyIn.amount_due - buyIn.amount_paid}
+                    <Text style={styles.amountLabel}>Due</Text>
+                    <Text style={styles.amountValue}>${buyIn.amount_due}</Text>
+                  </View>
+                  <View style={styles.amountRow}>
+                    <Text style={styles.amountLabel}>Paid</Text>
+                    <Text style={[styles.amountValue, buyIn.amount_paid > 0 && { color: colors.success }]}>
+                      ${buyIn.amount_paid}
                     </Text>
                   </View>
+                  {buyIn.amount_due - buyIn.amount_paid > 0 && (
+                    <View style={styles.amountRow}>
+                      <Text style={styles.amountLabel}>Remaining</Text>
+                      <Text style={[styles.amountValue, { color: colors.error }]}>
+                        ${buyIn.amount_due - buyIn.amount_paid}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {buyIn.paid_date && (
+                  <Text style={styles.paidDate}>
+                    Paid on {new Date(buyIn.paid_date).toLocaleDateString()}
+                    {buyIn.payment_method && ` via ${buyIn.payment_method}`}
+                  </Text>
+                )}
+
+                {buyIn.notes && (
+                  <Text style={styles.notes}>{buyIn.notes}</Text>
                 )}
               </View>
-
-              {buyIn.paid_date && (
-                <Text style={styles.paidDate}>
-                  Paid on {new Date(buyIn.paid_date).toLocaleDateString()}
-                  {buyIn.payment_method && ` via ${buyIn.payment_method}`}
-                </Text>
-              )}
-
-              {buyIn.notes && (
-                <Text style={styles.notes}>{buyIn.notes}</Text>
-              )}
-            </View>
-          ))
+            );
+          })
         )}
       </View>
 
       <View style={{ height: 50 }} />
+
+      {/* Edit Buy-In Modal */}
+      <Modal
+        visible={!!editingBuyIn}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setEditingBuyIn(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setEditingBuyIn(null)}
+        >
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Buy-In</Text>
+              <TouchableOpacity onPress={() => setEditingBuyIn(null)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {editingBuyIn && (
+              <>
+                <Text style={styles.modalSubtitle}>{editingBuyIn.owner_name}</Text>
+                {editingBuyIn.team_name && (
+                  <Text style={styles.modalTeamName}>{editingBuyIn.team_name}</Text>
+                )}
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Amount Due ($)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editAmountDue}
+                    onChangeText={setEditAmountDue}
+                    keyboardType="numeric"
+                    placeholder="Enter amount due"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Amount Paid ($)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editAmountPaid}
+                    onChangeText={setEditAmountPaid}
+                    keyboardType="numeric"
+                    placeholder="Enter amount paid"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                </View>
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setEditingBuyIn(null)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.saveButton}
+                    onPress={handleSaveBuyIn}
+                    disabled={updateMutation.isPending}
+                  >
+                    <Text style={styles.saveButtonText}>
+                      {updateMutation.isPending ? 'Saving...' : 'Save'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ScrollView>
   );
 }
@@ -414,6 +617,21 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     textAlign: 'center',
   },
+  initializeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.lg,
+  },
+  initializeButtonText: {
+    color: colors.white,
+    fontWeight: '600',
+    fontSize: fontSize.md,
+  },
   buyInCard: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.md,
@@ -484,5 +702,118 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  editButton: {
+    padding: spacing.xs,
+  },
+  individualProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  individualProgressBar: {
+    flex: 1,
+    height: 6,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.full,
+    overflow: 'hidden',
+  },
+  individualProgressFill: {
+    height: '100%',
+    borderRadius: borderRadius.full,
+  },
+  individualProgressText: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    width: 35,
+    textAlign: 'right',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  modalContent: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: 'bold',
+    color: colors.text,
+  },
+  modalSubtitle: {
+    fontSize: fontSize.md,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  modalTeamName: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    marginBottom: spacing.md,
+  },
+  inputGroup: {
+    marginBottom: spacing.md,
+  },
+  inputLabel: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  input: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    fontSize: fontSize.md,
+    color: colors.text,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  cancelButton: {
+    flex: 1,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: colors.textSecondary,
+    fontWeight: '600',
+    fontSize: fontSize.md,
+  },
+  saveButton: {
+    flex: 1,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: colors.white,
+    fontWeight: '600',
+    fontSize: fontSize.md,
   },
 });

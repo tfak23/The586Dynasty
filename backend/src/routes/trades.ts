@@ -6,22 +6,36 @@ import type { Trade, ApiResponse } from '../types/index.js';
 export const tradeRoutes = Router();
 
 // Get all trades for a league
+// Supports visibility rules: pending trades only visible to involved teams
+// Supports 'past' filter for rejected/cancelled/vetoed trades from current season
 tradeRoutes.get('/league/:leagueId', async (req, res, next) => {
   try {
-    const { status } = req.query;
-    
+    const { status, team_id } = req.query;
+
+    // Get league's current season
+    const league = await queryOne('SELECT current_season FROM leagues WHERE id = $1', [req.params.leagueId]);
+    const currentSeason = league?.current_season || new Date().getFullYear();
+
     let sql = `SELECT * FROM trades WHERE league_id = $1`;
     const params: any[] = [req.params.leagueId];
-    
-    if (status) {
-      sql += ` AND status = $2`;
+    let paramIndex = 2;
+
+    if (status === 'past') {
+      // Past trades: rejected, cancelled, or vetoed from current season
+      sql += ` AND status IN ('rejected', 'cancelled', 'vetoed')
+               AND EXTRACT(YEAR FROM created_at) = $${paramIndex}`;
+      params.push(currentSeason);
+      paramIndex++;
+    } else if (status) {
+      sql += ` AND status = $${paramIndex}`;
       params.push(status);
+      paramIndex++;
     }
-    
+
     sql += ' ORDER BY created_at DESC';
-    
+
     const trades = await query(sql, params);
-    
+
     // Get trade teams and assets for each trade
     const tradesWithDetails = await Promise.all(
       trades.map(async (trade) => {
@@ -32,9 +46,9 @@ tradeRoutes.get('/league/:leagueId', async (req, res, next) => {
            WHERE tt.trade_id = $1`,
           [trade.id]
         );
-        
+
         const assets = await query(
-          `SELECT ta.*, 
+          `SELECT ta.*,
                   c.salary, c.years_remaining,
                   p.full_name as player_name, p.position,
                   ft.team_name as from_team_name,
@@ -47,14 +61,29 @@ tradeRoutes.get('/league/:leagueId', async (req, res, next) => {
            WHERE ta.trade_id = $1`,
           [trade.id]
         );
-        
+
         return { ...trade, teams, assets };
       })
     );
-    
+
+    // Apply visibility rules:
+    // - Pending trades: only visible to involved teams (if team_id provided)
+    // - Accepted/completed trades: visible to all
+    let filteredTrades = tradesWithDetails;
+    if (team_id) {
+      filteredTrades = tradesWithDetails.filter((trade: any) => {
+        // Pending trades only visible to involved teams
+        if (trade.status === 'pending') {
+          return trade.teams?.some((t: any) => t.team_id === team_id);
+        }
+        // All other trades visible to everyone
+        return true;
+      });
+    }
+
     res.json({
       status: 'success',
-      data: tradesWithDetails,
+      data: filteredTrades,
     });
   } catch (error) {
     next(error);
@@ -86,12 +115,16 @@ tradeRoutes.get('/:id', async (req, res, next) => {
               c.salary, c.years_remaining,
               p.full_name as player_name, p.position,
               ft.team_name as from_team_name,
-              tt.team_name as to_team_name
+              tt.team_name as to_team_name,
+              dp.season, dp.round, dp.pick_number,
+              ot.team_name as original_team_name
        FROM trade_assets ta
        LEFT JOIN contracts c ON ta.contract_id = c.id
        LEFT JOIN players p ON c.player_id = p.id
        LEFT JOIN teams ft ON ta.from_team_id = ft.id
        LEFT JOIN teams tt ON ta.to_team_id = tt.id
+       LEFT JOIN draft_picks dp ON ta.draft_pick_id = dp.id
+       LEFT JOIN teams ot ON dp.original_team_id = ot.id
        WHERE ta.trade_id = $1`,
       [req.params.id]
     );
@@ -104,9 +137,46 @@ tradeRoutes.get('/:id', async (req, res, next) => {
       [req.params.id]
     );
     
+    // Transform assets into assets_receiving for each team
+    const teamsWithAssets = teams.map((team: any) => {
+      const assetsReceiving = assets
+        .filter((asset: any) => asset.to_team_id === team.team_id)
+        .map((asset: any) => {
+          if (asset.asset_type === 'contract') {
+            return {
+              type: 'player',
+              player_name: asset.player_name,
+              position: asset.position,
+              salary: asset.salary,
+              years_remaining: asset.years_remaining,
+              from_team_name: asset.from_team_name,
+            };
+          } else if (asset.asset_type === 'draft_pick') {
+            return {
+              type: 'pick',
+              season: asset.season,
+              round: asset.round,
+              pick_number: asset.pick_number,
+              original_team_name: asset.original_team_name,
+              from_team_name: asset.from_team_name,
+            };
+          } else if (asset.asset_type === 'cap_space') {
+            return {
+              type: 'cap',
+              cap_amount: asset.cap_amount,
+              cap_year: asset.cap_year,
+              from_team_name: asset.from_team_name,
+            };
+          }
+          return asset;
+        });
+      
+      return { ...team, assets_receiving: assetsReceiving };
+    });
+    
     res.json({
       status: 'success',
-      data: { ...trade, teams, assets, votes },
+      data: { ...trade, teams: teamsWithAssets, assets, votes },
     } as ApiResponse<Trade & { teams: any[]; assets: any[]; votes: any[] }>);
   } catch (error) {
     next(error);
@@ -122,6 +192,7 @@ tradeRoutes.post('/', async (req, res, next) => {
       assets, // Array of { from_team_id, to_team_id, asset_type, contract_id?, draft_pick_id?, cap_amount? }
       expires_in = '24h', // '1h', '24h', '2d', '1w'
       notes,
+      proposer_team_id, // The team that created the trade proposal
     } = req.body;
     
     if (!league_id || !team_ids || team_ids.length < 2 || !assets || assets.length === 0) {
@@ -168,29 +239,33 @@ tradeRoutes.post('/', async (req, res, next) => {
     // Create trade
     const trade = await queryOne<Trade>(
       `INSERT INTO trades (
-        league_id, status, approval_mode, 
+        league_id, status, approval_mode,
         requires_commissioner_approval, requires_league_vote,
-        vote_deadline, expires_at, notes
-      ) VALUES ($1, 'pending', $2, $3, $4, $5, $6, $7)
+        vote_deadline, expires_at, notes, proposer_team_id
+      ) VALUES ($1, 'pending', $2, $3, $4, $5, $6, $7, $8)
       RETURNING *`,
       [
         league_id,
         league.trade_approval_mode,
         league.trade_approval_mode === 'commissioner',
         league.trade_approval_mode === 'league_vote',
-        league.trade_approval_mode === 'league_vote' 
+        league.trade_approval_mode === 'league_vote'
           ? new Date(Date.now() + league.league_vote_window_hours * 60 * 60 * 1000)
           : null,
         expiresAt,
         notes,
+        proposer_team_id || team_ids[0], // Default to first team if not specified
       ]
     );
     
     // Add trade teams
+    // The proposer automatically has 'accepted' status since they created the trade
+    const proposerId = proposer_team_id || team_ids[0];
     for (const teamId of team_ids) {
+      const teamStatus = teamId === proposerId ? 'accepted' : 'pending';
       await execute(
-        `INSERT INTO trade_teams (trade_id, team_id, status) VALUES ($1, $2, 'pending')`,
-        [trade?.id, teamId]
+        `INSERT INTO trade_teams (trade_id, team_id, status) VALUES ($1, $2, $3)`,
+        [trade?.id, teamId, teamStatus]
       );
     }
     
@@ -428,21 +503,55 @@ tradeRoutes.post('/:id/vote', async (req, res, next) => {
 tradeRoutes.post('/:id/cancel', async (req, res, next) => {
   try {
     const { team_id } = req.body;
-    
+
     const trade = await queryOne<Trade>('SELECT * FROM trades WHERE id = $1', [req.params.id]);
     if (!trade) {
       throw new AppError('Trade not found', 404);
     }
-    
+
     if (trade.status !== 'pending') {
       throw new AppError('Can only cancel pending trades', 400);
     }
-    
+
     await execute('UPDATE trades SET status = \'cancelled\' WHERE id = $1', [req.params.id]);
-    
+
     res.json({
       status: 'success',
       message: 'Trade cancelled',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Withdraw trade (by proposing team only)
+tradeRoutes.post('/:id/withdraw', async (req, res, next) => {
+  try {
+    const { team_id } = req.body;
+
+    if (!team_id) {
+      throw new AppError('team_id is required', 400);
+    }
+
+    const trade = await queryOne<Trade>('SELECT * FROM trades WHERE id = $1', [req.params.id]);
+    if (!trade) {
+      throw new AppError('Trade not found', 404);
+    }
+
+    if (trade.status !== 'pending') {
+      throw new AppError('Can only withdraw pending trades', 400);
+    }
+
+    // Only the proposer can withdraw
+    if (trade.proposer_team_id !== team_id) {
+      throw new AppError('Only the proposer can withdraw this trade', 403);
+    }
+
+    await execute('UPDATE trades SET status = \'cancelled\' WHERE id = $1', [req.params.id]);
+
+    res.json({
+      status: 'success',
+      message: 'Trade withdrawn',
     });
   } catch (error) {
     next(error);

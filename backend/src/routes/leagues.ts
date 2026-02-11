@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, queryOne, execute } from '../db/index.js';
 import { AppError } from '../middleware/errorHandler.js';
+import SleeperService from '../services/sleeper.js';
 import type { League, ApiResponse } from '../types/index.js';
 
 export const leagueRoutes = Router();
@@ -502,6 +503,157 @@ leagueRoutes.post('/:id/history', async (req, res, next) => {
   }
 });
 
+// Sync season data from Sleeper API
+// This fetches current season standings and updates/creates season records
+leagueRoutes.post('/:id/history/sync-season', async (req, res, next) => {
+  try {
+    const { season } = req.body;
+    const leagueId = req.params.id;
+
+    // Get the league to get sleeper_league_id
+    const league = await queryOne<League>(
+      'SELECT * FROM leagues WHERE id = $1',
+      [leagueId]
+    );
+
+    if (!league) {
+      throw new AppError('League not found', 404);
+    }
+
+    const targetSeason = season || league.current_season;
+    const sleeper = new SleeperService(league.sleeper_league_id);
+
+    // Get rosters and users from Sleeper
+    const [rosters, users] = await Promise.all([
+      sleeper.getRosters(),
+      sleeper.getUsers(),
+    ]);
+
+    // Create user lookup
+    const userMap = new Map(users.map(u => [u.user_id, u]));
+
+    const updates: any[] = [];
+
+    // Process each roster
+    for (const roster of rosters) {
+      const user = userMap.get(roster.owner_id);
+      if (!user) continue;
+
+      const ownerName = user.display_name || user.username;
+      const wins = roster.settings?.wins || 0;
+      const losses = roster.settings?.losses || 0;
+      const ties = roster.settings?.ties || 0;
+      const points = (roster.settings?.fpts || 0) + ((roster.settings?.fpts_decimal || 0) / 100);
+
+      // Get existing history record
+      let historyRecord = await queryOne<any>(
+        `SELECT * FROM league_history WHERE league_id = $1 AND owner_name = $2`,
+        [leagueId, ownerName]
+      );
+
+      if (!historyRecord) {
+        // Create new record
+        historyRecord = await queryOne<any>(
+          `INSERT INTO league_history (league_id, owner_name, is_active, season_records)
+           VALUES ($1, $2, true, '[]')
+           RETURNING *`,
+          [leagueId, ownerName]
+        );
+      }
+
+      // Parse existing season records
+      let seasonRecords = [];
+      try {
+        seasonRecords = typeof historyRecord.season_records === 'string' 
+          ? JSON.parse(historyRecord.season_records) 
+          : (historyRecord.season_records || []);
+      } catch (e) {
+        seasonRecords = [];
+      }
+
+      // Find or create season record
+      const existingSeasonIdx = seasonRecords.findIndex((s: any) => s.season === targetSeason);
+      const seasonRecord = {
+        season: targetSeason,
+        wins,
+        losses,
+        ties,
+        points,
+        placing: null, // Will be calculated below
+        playoffs: false, // Will need to be set manually or inferred
+      };
+
+      if (existingSeasonIdx >= 0) {
+        seasonRecords[existingSeasonIdx] = { ...seasonRecords[existingSeasonIdx], ...seasonRecord };
+      } else {
+        seasonRecords.push(seasonRecord);
+      }
+
+      // Calculate totals from all season records
+      const totalWins = seasonRecords.reduce((sum: number, s: any) => sum + (s.wins || 0), 0);
+      const totalLosses = seasonRecords.reduce((sum: number, s: any) => sum + (s.losses || 0), 0);
+      const totalTies = seasonRecords.reduce((sum: number, s: any) => sum + (s.ties || 0), 0);
+      const totalPoints = seasonRecords.reduce((sum: number, s: any) => sum + (s.points || 0), 0);
+      const totalGames = totalWins + totalLosses + totalTies;
+      const winPct = totalGames > 0 ? totalWins / totalGames : 0;
+
+      // Update record
+      await query(
+        `UPDATE league_history SET
+           total_wins = $1,
+           total_losses = $2,
+           total_ties = $3,
+           total_points = $4,
+           win_percentage = $5,
+           season_records = $6,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = $7`,
+        [totalWins, totalLosses, totalTies, totalPoints, winPct, JSON.stringify(seasonRecords), historyRecord.id]
+      );
+
+      updates.push({
+        owner_name: ownerName,
+        season: targetSeason,
+        record: `${wins}-${losses}-${ties}`,
+        points,
+      });
+    }
+
+    // Calculate placing for this season based on points
+    const sortedUpdates = [...updates].sort((a, b) => b.points - a.points);
+    for (let i = 0; i < sortedUpdates.length; i++) {
+      const owner = sortedUpdates[i];
+      // Update the placing in season_records
+      await query(
+        `UPDATE league_history 
+         SET season_records = (
+           SELECT jsonb_agg(
+             CASE 
+               WHEN (elem->>'season')::int = $1 
+               THEN elem || jsonb_build_object('placing', $2)
+               ELSE elem
+             END
+           )
+           FROM jsonb_array_elements(season_records) elem
+         )
+         WHERE league_id = $3 AND owner_name = $4`,
+        [targetSeason, i + 1, leagueId, owner.owner_name]
+      );
+    }
+
+    res.json({
+      status: 'success',
+      message: `Synced ${updates.length} owners for season ${targetSeason}`,
+      data: {
+        season: targetSeason,
+        updated: updates,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // =============================================
 // BUY-INS ENDPOINTS
 // =============================================
@@ -570,11 +722,17 @@ leagueRoutes.get('/:id/buy-ins/seasons', async (req, res, next) => {
 // Update buy-in status (commissioner only)
 leagueRoutes.put('/:id/buy-ins/:buyInId', async (req, res, next) => {
   try {
-    const { amount_paid, status, payment_method, notes, paid_date } = req.body;
+    const { amount_due, amount_paid, status, payment_method, notes, paid_date } = req.body;
 
     const updates: string[] = [];
     const values: any[] = [];
     let paramIndex = 1;
+
+    if (amount_due !== undefined) {
+      updates.push(`amount_due = $${paramIndex}`);
+      values.push(amount_due);
+      paramIndex++;
+    }
 
     if (amount_paid !== undefined) {
       updates.push(`amount_paid = $${paramIndex}`);

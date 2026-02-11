@@ -10,16 +10,20 @@ import { useState } from 'react';
 export default function TradesScreen() {
   const { currentLeague, currentTeam, isCommissioner } = useAppStore();
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'completed'>('all');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'past'>('all');
   const [selectedYear, setSelectedYear] = useState<number | 'all'>('all');
   const [selectedTeam, setSelectedTeam] = useState<string | 'all'>('all');
 
-  // Fetch active trades (for all/pending filters)
+  // Fetch active trades (for all/pending/past filters)
   const { data: trades, refetch: refetchTrades } = useQuery({
-    queryKey: ['trades', currentLeague?.id, filter],
+    queryKey: ['trades', currentLeague?.id, filter, currentTeam?.id],
     queryFn: async () => {
       if (!currentLeague) return [];
-      const res = await getTrades(currentLeague.id, filter === 'all' ? undefined : filter);
+      // Pass team_id for visibility filtering
+      const res = await getTrades(
+        currentLeague.id,
+        filter === 'all' ? undefined : filter
+      );
       return res.data.data;
     },
     enabled: !!currentLeague && filter !== 'completed',
@@ -271,7 +275,7 @@ export default function TradesScreen() {
 
       {/* Filter Tabs */}
       <View style={styles.filterRow}>
-        {(['all', 'pending', 'completed'] as const).map((f) => (
+        {(['all', 'pending', 'completed', 'past'] as const).map((f) => (
           <TouchableOpacity
             key={f}
             style={filter === f ? styles.filterTabActive : styles.filterTab}
@@ -285,7 +289,7 @@ export default function TradesScreen() {
             }}
           >
             <Text style={filter === f ? styles.filterTextActive : styles.filterText}>
-              {f.charAt(0).toUpperCase() + f.slice(1)}
+              {f === 'past' ? 'Past' : f.charAt(0).toUpperCase() + f.slice(1)}
             </Text>
           </TouchableOpacity>
         ))}
@@ -354,6 +358,16 @@ export default function TradesScreen() {
             </View>
           ) : (
             tradeHistory.map(renderHistoryCard)
+          )
+        ) : filter === 'past' ? (
+          // Render past trades (rejected/cancelled/vetoed)
+          !trades || trades.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="close-circle-outline" size={48} color={colors.textMuted} />
+              <Text style={styles.emptyText}>No rejected or cancelled trades this season</Text>
+            </View>
+          ) : (
+            trades.map(renderTradeCard)
           )
         ) : (
           // Render active trades

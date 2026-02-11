@@ -11,6 +11,7 @@ type Position = 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DEF';
 // Rating badge colors
 const RATING_COLORS: Record<ContractRating, { bg: string; text: string }> = {
   LEGENDARY: { bg: '#FFD700', text: '#1a1a2e' },  // Gold
+  CORNERSTONE: { bg: '#06B6D4', text: '#ffffff' }, // Cyan/Teal
   STEAL: { bg: '#22C55E', text: '#ffffff' },      // Green
   GOOD: { bg: '#3B82F6', text: '#ffffff' },       // Blue
   BUST: { bg: '#EF4444', text: '#ffffff' },       // Red
@@ -19,6 +20,7 @@ const RATING_COLORS: Record<ContractRating, { bg: string; text: string }> = {
 
 const RATING_ICONS: Record<ContractRating, string> = {
   LEGENDARY: 'trophy',
+  CORNERSTONE: 'diamond',
   STEAL: 'trending-up',
   GOOD: 'checkmark-circle',
   BUST: 'trending-down',
@@ -264,16 +266,27 @@ export default function ContractDetailScreen() {
                 <Text style={styles.yourSalary}>${evaluation.actual_salary}</Text>
               </View>
               <View style={styles.valueDiffRow}>
-                <Text style={styles.valueLabel}>
-                  {evaluation.salary_difference >= 0 ? 'You\'re Saving' : 'Overpaying By'}
-                </Text>
-                <Text style={[
-                  styles.valueDiff,
-                  { color: evaluation.salary_difference >= 0 ? colors.success : colors.error }
-                ]}>
-                  ${Math.abs(evaluation.salary_difference).toFixed(0)}/year
-                  ({Math.abs(evaluation.value_score)}%)
-                </Text>
+                {Math.abs(evaluation.value_score) < 5 ? (
+                  <>
+                    <Text style={styles.valueLabel}>Contract Value</Text>
+                    <Text style={[styles.valueDiff, { color: colors.primary }]}>
+                      Fair Market Value
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.valueLabel}>
+                      {evaluation.salary_difference >= 0 ? 'You\'re Saving' : 'Overpaying By'}
+                    </Text>
+                    <Text style={[
+                      styles.valueDiff,
+                      { color: evaluation.salary_difference >= 0 ? colors.success : colors.error }
+                    ]}>
+                      ${Math.abs(evaluation.salary_difference).toFixed(0)}/year
+                      ({Math.abs(evaluation.value_score)}%)
+                    </Text>
+                  </>
+                )}
               </View>
             </View>
 

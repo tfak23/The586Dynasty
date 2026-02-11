@@ -55,12 +55,28 @@ const commissionerTools: ToolItem[] = [
     color: '#8B5CF6',
   },
   {
+    id: 'buyins',
+    title: 'Manage Buy-Ins',
+    description: 'Track league dues and payments',
+    icon: 'cash-outline',
+    route: '/commissioner/buyins',
+    color: '#10B981',
+  },
+  {
     id: 'rules',
     title: 'Edit Rules',
     description: 'Update league rules and settings',
     icon: 'document-text-outline',
     route: '/commissioner/rules',
     color: colors.error,
+  },
+  {
+    id: 'season',
+    title: 'Advance Season',
+    description: 'Move to next season and set tag deadline',
+    icon: 'calendar-outline',
+    route: '/commissioner/season',
+    color: '#06B6D4',
   },
 ];
 

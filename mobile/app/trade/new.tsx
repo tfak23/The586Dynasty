@@ -1,11 +1,20 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Modal } from 'react-native';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, borderRadius, positionColors } from '@/lib/theme';
-import { getTeams, getTeamRoster, createTrade, getTeamDraftPicks } from '@/lib/api';
+import { getTeams, getTeamRoster, createTrade, getTeamDraftPicks, rejectTrade } from '@/lib/api';
 import { useAppStore } from '@/lib/store';
+
+// Expiration options for trade offers
+const EXPIRATION_OPTIONS = [
+  { label: '1 hour', value: 1 },
+  { label: '24 hours', value: 24 },
+  { label: '2 days', value: 48 },
+  { label: '1 week', value: 168 },
+  { label: 'Never', value: null },
+] as const;
 
 type Position = 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DEF';
 
@@ -38,6 +47,10 @@ export default function NewTradeScreen() {
   const queryClient = useQueryClient();
   const { currentLeague, currentTeam, settings } = useAppStore();
 
+  // Check for counter offer params
+  const { counterOfferId, partnerId } = useLocalSearchParams<{ counterOfferId?: string; partnerId?: string }>();
+  const isCounterOffer = !!counterOfferId && !!partnerId;
+
   // Get pick value from settings
   const getPickValue = (pick: any) => {
     if (pick.pick_number) {
@@ -46,13 +59,15 @@ export default function NewTradeScreen() {
     const midPick = (pick.round - 1) * 12 + 6;
     return settings.rookiePickValues[midPick] || 1;
   };
-  
+
   const [selectedTeams, setSelectedTeams] = useState<string[]>([currentTeam?.id || '']);
   const [myAssets, setMyAssets] = useState<SelectedAsset[]>([]);
   const [theirAssets, setTheirAssets] = useState<SelectedAsset[]>([]);
   const [notes, setNotes] = useState('');
   const [step, setStep] = useState<'teams' | 'assets' | 'review'>('teams');
   const [activeSelector, setActiveSelector] = useState<'mine' | 'theirs' | null>(null);
+  // Trade expiration (hours or null for never)
+  const [expirationHours, setExpirationHours] = useState<number | null>(24);
   // Cap space modal state
   const [showCapModal, setShowCapModal] = useState(false);
   const [capModalIsMine, setCapModalIsMine] = useState(true);
@@ -69,9 +84,18 @@ export default function NewTradeScreen() {
     enabled: !!currentLeague,
   });
 
-  const tradingPartner = teams?.find((t: any) => 
+  const tradingPartner = teams?.find((t: any) =>
     selectedTeams.includes(t.id) && t.id !== currentTeam?.id
   );
+
+  // If counter offer, pre-select the trading partner and skip to assets
+  useEffect(() => {
+    if (isCounterOffer && partnerId && currentTeam?.id) {
+      setSelectedTeams([currentTeam.id, partnerId]);
+      setStep('assets');
+      setNotes('Counter offer');
+    }
+  }, [isCounterOffer, partnerId, currentTeam?.id]);
 
   const { data: myRoster } = useQuery({
     queryKey: ['roster', currentTeam?.id],
@@ -204,15 +228,31 @@ export default function NewTradeScreen() {
         }
       }
 
+      // Calculate expiration timestamp if set
+      const expiresAt = expirationHours
+        ? new Date(Date.now() + expirationHours * 60 * 60 * 1000).toISOString()
+        : null;
+
+      // If this is a counter offer, reject the original trade first
+      if (isCounterOffer && counterOfferId && currentTeam?.id) {
+        try {
+          await rejectTrade(counterOfferId, currentTeam.id);
+        } catch (err) {
+          console.warn('Failed to reject original trade:', err);
+          // Continue with counter offer even if reject fails
+        }
+      }
+
       return createTrade({
         league_id: currentLeague.id,
         team_ids: [currentTeam.id, tradingPartner.id],
         assets,
-        notes,
+        notes: isCounterOffer ? `Counter offer to Trade #${counterOfferId?.slice(0, 8)}. ${notes}`.trim() : notes,
+        expires_at: expiresAt,
       });
     },
     onSuccess: () => {
-      Alert.alert('Success', 'Trade proposal sent!');
+      Alert.alert('Success', isCounterOffer ? 'Counter offer sent!' : 'Trade proposal sent!');
       queryClient.invalidateQueries();
       router.back();
     },
@@ -534,6 +574,24 @@ export default function NewTradeScreen() {
             multiline
             numberOfLines={3}
           />
+        </View>
+
+        {/* Expiration */}
+        <View style={styles.expirationSection}>
+          <Text style={styles.expirationLabel}>Trade expires in:</Text>
+          <View style={styles.expirationOptions}>
+            {EXPIRATION_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option.label}
+                style={expirationHours === option.value ? styles.expirationOptionActive : styles.expirationOption}
+                onPress={() => setExpirationHours(option.value)}
+              >
+                <Text style={expirationHours === option.value ? styles.expirationOptionTextActive : styles.expirationOptionText}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
       </ScrollView>
 
@@ -1075,5 +1133,45 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: 'bold',
     fontSize: fontSize.md,
+  },
+  // Expiration styles
+  expirationSection: {
+    marginTop: spacing.lg,
+  },
+  expirationLabel: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  expirationOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  expirationOption: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  expirationOptionActive: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  expirationOptionText: {
+    color: colors.textSecondary,
+    fontWeight: '600',
+    fontSize: fontSize.sm,
+  },
+  expirationOptionTextActive: {
+    color: colors.white,
+    fontWeight: '600',
+    fontSize: fontSize.sm,
   },
 });

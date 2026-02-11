@@ -1,0 +1,358 @@
+Cap adjustment context: 
+CAP HITS	2026	2027	2028	2029	2030
+Dameon Pierce	2				
+Rico Dowdle	2				
+Dameon Pierce	7				
+Gabe Davis	3				
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+					
+					
+					
+					
+					
+					
+
+Brian:
+CAP HITS	2026	2027	2028	2029	2030
+Trade 25.19	10				
+Trade 25.23	10				
+Kendre Miller	2	1			
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+Trade 24.25	12				
+					
+					
+					
+					
+					
+Dan:
+CAP HITS	2026	2027	2028	2029	2030
+Trade 24.25	12				
+Javonte Williams	12	5			
+Devin Singletary	5				
+Trevor Lawrence	12	5			
+Devontez Walker	1				
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+Trade 26.02	53				
+Trade 25.17	9				
+Trade 25.23	10				
+					
+					
+					
+
+Dom: 
+CAP HITS	2026	2027	2028	2029	2030
+Darren Waller	2				
+Kadarius Toney	2				
+Isiah Pacheco	7	3			
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+Trade 25.19	10				
+					
+					
+					
+					
+Jamie:					
+CAP HITS	2026	2027	2028	2029	2030
+Kenny Pickett	2				
+Jermaine Burton	3				
+Dontayvion Wicks	4				
+Trade 25.03	15				
+Brenden Rice	1				
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+					
+					
+					
+					
+					
+Karl:
+CAP HITS	2026	2027	2028	2029	2030
+Audric Estime	1				
+Jaylen Wright	2				
+Javon Baker	1				
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+					
+					
+					
+					
+Nick:
+CAP HITS	2026	2027	2028	2029	2030
+Pat Freiermuth	5	2			
+Jahan Dotson	3				
+Tyreek Hill	10				
+Jaylin Hyatt	1				
+Anthony Richardson	7	3			
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+Trade 25.03	15				
+					
+					
+					
+					
+					
+
+Tony:
+CAP HITS	2026	2027	2028	2029	2030
+Amari Cooper	4	2			
+Trade 26.02	53				
+Tyler Lockett	2				
+Spencer Rattler	4	2			
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+					
+					
+					
+					
+					
+					
+Trevor:
+CAP HITS	2026	2027	2028	2029	2030
+Deuce Vaughn	2				
+Bryce Young	7	3			
+Jonathan Mingo	4	2			
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+Trade 24.24	15				
+					
+					
+					
+					
+					
+Trudy:
+CAP HITS	2026	2027	2028	2029	2030
+Quentin Johnston	6	3			
+Trade 25.25	8				
+Trade 25.17	9				
+Trevor Etienne	1				
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+					
+					
+					
+					
+					
+Willy:
+CAP HITS	2026	2027	2028	2029	2030
+Hendon Hooker	4	2			
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+Trade 25.25	8				
+					
+					
+					
+					
+					
+Zach:
+CAP HITS	2026	2027	2028	2029	2030
+Ben Sinnott	3	2			
+Jahan Dotson	2				
+Justin Fields	12				
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+CAP CREDITS	2026	2027	2028	2029	2030
+					
+					
+					
+					
+					
+					
+					
+
+
+
+					
+					
+
+
+					
+
+
+
