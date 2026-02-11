@@ -14,6 +14,9 @@ import { colors } from '@/lib/theme';
 import { useAuthStore } from '@/lib/authStore';
 import { discoverLeagues, convertLeague, joinLeague, UserLeague } from '@/lib/api';
 
+// Constants
+const SUCCESS_COLOR = colors.success || '#10b981';
+
 export default function DiscoverLeaguesScreen() {
   const [leagues, setLeagues] = useState<UserLeague[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -247,12 +250,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   joinButton: {
-    backgroundColor: colors.success || '#10b981',
+    backgroundColor: SUCCESS_COLOR,
   },
   joinedButton: {
     backgroundColor: colors.cardBackground,
     borderWidth: 1,
-    borderColor: colors.success || '#10b981',
+    borderColor: SUCCESS_COLOR,
   },
   buttonText: {
     color: '#fff',
@@ -260,7 +263,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   joinedText: {
-    color: colors.success || '#10b981',
+    color: SUCCESS_COLOR,
     fontSize: 14,
     fontWeight: '600',
   },

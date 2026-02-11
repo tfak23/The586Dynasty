@@ -14,7 +14,11 @@ export interface User {
   sleeper_user_id?: string;
 }
 
-// Auth state interface
+/**
+ * Authentication state interface
+ * Manages user authentication state throughout the application
+ * including user data, JWT token, and loading states.
+ */
 interface AuthState {
   // User and token
   user: User | null;

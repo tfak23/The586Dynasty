@@ -79,7 +79,14 @@ export const isValidEmail = (email: string): boolean => {
 
 /**
  * Validate password strength
- * Requires: at least 8 characters, 1 uppercase, 1 lowercase, 1 number
+ * Requirements:
+ * - At least 8 characters
+ * - At least 1 uppercase letter
+ * - At least 1 lowercase letter
+ * - At least 1 number
+ * 
+ * @param password - The password string to validate
+ * @returns true if password meets all requirements, false otherwise
  */
 export const isValidPassword = (password: string): boolean => {
   if (password.length < 8) return false;

@@ -5,6 +5,18 @@ import { SleeperService } from '../services/sleeper.js';
 
 const router = Router();
 
+// Get current season (can be overridden by env var)
+const getCurrentSeason = () => {
+  const envSeason = process.env.CURRENT_SEASON;
+  if (envSeason) return envSeason;
+  
+  // Default to current year, switching to next year in February
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-11
+  return month >= 1 ? String(year) : String(year - 1); // After Feb 1, use current year
+};
+
 /**
  * GET /api/user-leagues/discover
  * Discover leagues for the authenticated user's Sleeper account
@@ -28,7 +40,7 @@ router.get('/discover', authenticateToken, async (req: Request, res: Response) =
     }
 
     const sleeperUserId = sleeperResult.rows[0].sleeper_user_id;
-    const season = req.query.season as string || '2025';
+    const season = req.query.season as string || getCurrentSeason();
 
     // Get leagues from Sleeper
     const sleeperLeagues = await SleeperService.getUserLeagues(sleeperUserId, season);
@@ -129,7 +141,7 @@ router.post('/convert', authenticateToken, async (req: Request, res: Response) =
     const sleeperUserId = sleeperResult.rows[0].sleeper_user_id;
 
     // Verify user is part of this league
-    const userLeagues = await SleeperService.getUserLeagues(sleeperUserId, '2025');
+    const userLeagues = await SleeperService.getUserLeagues(sleeperUserId, getCurrentSeason());
     const targetLeague = userLeagues.find(l => l.league_id === sleeper_league_id);
 
     if (!targetLeague) {
