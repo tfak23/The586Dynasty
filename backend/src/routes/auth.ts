@@ -9,6 +9,7 @@ import {
   isValidPassword 
 } from '../services/auth.js';
 import { generateToken, authenticateToken } from '../middleware/auth.js';
+import { authLimiter, passwordResetLimiter, apiLimiter } from '../middleware/rateLimiter.js';
 import { SleeperService } from '../services/sleeper.js';
 
 const router = Router();
@@ -17,7 +18,7 @@ const router = Router();
  * POST /api/auth/register
  * Register a new user with email and password
  */
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', authLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password, display_name } = req.body;
 
@@ -84,7 +85,7 @@ router.post('/register', async (req: Request, res: Response) => {
  * POST /api/auth/login
  * Login with email and password
  */
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', authLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
@@ -165,7 +166,7 @@ router.post('/login', async (req: Request, res: Response) => {
  * POST /api/auth/google
  * Login or register with Google OAuth
  */
-router.post('/google', async (req: Request, res: Response) => {
+router.post('/google', authLimiter, async (req: Request, res: Response) => {
   try {
     const { idToken } = req.body;
 
@@ -270,7 +271,7 @@ router.post('/google', async (req: Request, res: Response) => {
  * POST /api/auth/forgot-password
  * Request password reset
  */
-router.post('/forgot-password', async (req: Request, res: Response) => {
+router.post('/forgot-password', passwordResetLimiter, async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
 
@@ -326,7 +327,7 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
  * POST /api/auth/reset-password
  * Reset password with token
  */
-router.post('/reset-password', async (req: Request, res: Response) => {
+router.post('/reset-password', authLimiter, async (req: Request, res: Response) => {
   try {
     const { token, newPassword } = req.body;
 
@@ -375,7 +376,7 @@ router.post('/reset-password', async (req: Request, res: Response) => {
  * GET /api/auth/me
  * Get current user info (requires authentication)
  */
-router.get('/me', authenticateToken, async (req: Request, res: Response) => {
+router.get('/me', apiLimiter, authenticateToken, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -432,7 +433,7 @@ router.get('/me', authenticateToken, async (req: Request, res: Response) => {
  * POST /api/auth/link-sleeper
  * Link Sleeper account to user
  */
-router.post('/link-sleeper', authenticateToken, async (req: Request, res: Response) => {
+router.post('/link-sleeper', apiLimiter, authenticateToken, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });

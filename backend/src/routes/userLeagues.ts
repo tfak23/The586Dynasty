@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db/index.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { apiLimiter, leagueOperationLimiter } from '../middleware/rateLimiter.js';
 import { SleeperService } from '../services/sleeper.js';
 
 const router = Router();
@@ -21,7 +22,7 @@ const getCurrentSeason = () => {
  * GET /api/user-leagues/discover
  * Discover leagues for the authenticated user's Sleeper account
  */
-router.get('/discover', authenticateToken, async (req: Request, res: Response) => {
+router.get('/discover', apiLimiter, authenticateToken, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -114,7 +115,7 @@ router.get('/discover', authenticateToken, async (req: Request, res: Response) =
  * Convert a Sleeper league to a Salary Cap league
  * The user becomes the commissioner
  */
-router.post('/convert', authenticateToken, async (req: Request, res: Response) => {
+router.post('/convert', leagueOperationLimiter, authenticateToken, async (req: Request, res: Response) => {
   const client = await pool.connect();
   
   try {
@@ -284,7 +285,7 @@ router.post('/convert', authenticateToken, async (req: Request, res: Response) =
  * POST /api/user-leagues/join
  * Join an existing Salary Cap league
  */
-router.post('/join', authenticateToken, async (req: Request, res: Response) => {
+router.post('/join', leagueOperationLimiter, authenticateToken, async (req: Request, res: Response) => {
   const client = await pool.connect();
   
   try {
@@ -434,7 +435,7 @@ router.post('/join', authenticateToken, async (req: Request, res: Response) => {
  * GET /api/user-leagues/my-leagues
  * Get all leagues the authenticated user has joined
  */
-router.get('/my-leagues', authenticateToken, async (req: Request, res: Response) => {
+router.get('/my-leagues', apiLimiter, authenticateToken, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
