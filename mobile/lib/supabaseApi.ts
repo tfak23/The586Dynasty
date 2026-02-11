@@ -293,22 +293,5 @@ export const readGoogleDocSecure = async (
   return data;
 };
 
-/**
- * Check if Google Docs integration is available
- * @returns true if the Edge Function is deployed
- */
-export const isGoogleDocsAvailable = async (): Promise<boolean> => {
-  try {
-    // Try to invoke the function with a test call
-    const { error } = await supabase.functions.invoke('google-docs-read', {
-      body: { documentId: 'test' }
-    });
-    // If we get a validation error (not a 404), the function exists
-    return !error || error.message?.includes('documentId');
-  } catch (e) {
-    return false;
-  }
-};
-
 // Re-export for backward compatibility
 export * from './api';

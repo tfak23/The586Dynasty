@@ -2,12 +2,23 @@
 
 # Local Testing Script for Supabase Edge Functions
 # This script helps test Edge Functions locally before deployment
+#
+# USAGE:
+#   chmod +x supabase/test-functions-local.sh
+#   ./supabase/test-functions-local.sh
 
 set -e
 
 echo "🚀 Supabase Edge Functions Local Testing"
 echo "========================================"
 echo ""
+
+# Check if script has execute permissions
+if [ ! -x "$0" ]; then
+    echo "ℹ️  Note: This script needs execute permissions."
+    echo "Run: chmod +x supabase/test-functions-local.sh"
+    echo ""
+fi
 
 # Check if Supabase CLI is installed
 if ! command -v supabase &> /dev/null; then

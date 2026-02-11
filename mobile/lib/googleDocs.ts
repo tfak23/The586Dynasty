@@ -162,21 +162,36 @@ export const parseDocAsTable = async (documentId: string): Promise<string[][]> =
 
 /**
  * Check if Google Docs API is configured
+ * Note: This function is exported from googleDocs.ts and provides
+ * a domain-specific check for Google Docs functionality.
+ * A similar check exists in supabaseApi.ts but serves a different purpose.
  * @returns true if Edge Function is available
  */
 export const isGoogleDocsConfigured = async (): Promise<boolean> => {
   try {
-    // Check if the Edge Function is available
+    // Call the Edge Function with a minimal test to check availability
+    // We use an empty documentId which will trigger a validation error,
+    // confirming the function exists and is processing requests
     const { error } = await supabase.functions.invoke('google-docs-read', {
-      body: { documentId: '' }  // Will fail validation but confirms function exists
+      body: { documentId: '', operation: 'read' }
     });
     
-    // If we get a validation error (not a 404), the function exists and is configured
-    if (error && error.message?.includes('not found')) {
+    // If we get any error that's NOT a 404 (function not found), 
+    // the function exists and is configured
+    if (!error) {
+      // Unlikely but possible - empty ID might somehow pass
+      return true;
+    }
+    
+    // Check if it's a "not found" error (function doesn't exist)
+    const errorMessage = error.message?.toLowerCase() || '';
+    if (errorMessage.includes('not found') || errorMessage.includes('404')) {
       console.warn('Google Docs Edge Function not deployed');
       return false;
     }
     
+    // Any other error means the function exists but rejected our request
+    // (which is expected with an empty documentId)
     return true;
   } catch (error) {
     console.error('Error checking Google Docs configuration:', error);
