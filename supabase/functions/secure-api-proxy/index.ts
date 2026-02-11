@@ -1,0 +1,137 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+interface ApiProxyRequest {
+  service: 'google-docs' | 'google-sheets' | 'sleeper' | 'custom'
+  endpoint: string
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  body?: any
+  headers?: Record<string, string>
+}
+
+serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    // Parse the request body
+    const { service, endpoint, method = 'GET', body, headers = {} }: ApiProxyRequest = await req.json()
+
+    // Get the appropriate API key based on the service
+    let apiKey: string | undefined
+    let serviceAccountKey: string | undefined
+
+    switch (service) {
+      case 'google-docs':
+        apiKey = Deno.env.get('GOOGLE_DOCS_API_KEY')
+        serviceAccountKey = Deno.env.get('GOOGLE_DOCS_SERVICE_ACCOUNT')
+        break
+      case 'google-sheets':
+        apiKey = Deno.env.get('GOOGLE_SHEETS_API_KEY')
+        serviceAccountKey = Deno.env.get('GOOGLE_SHEETS_SERVICE_ACCOUNT')
+        break
+      case 'custom':
+        apiKey = Deno.env.get('CUSTOM_API_KEY')
+        break
+      case 'sleeper':
+        // Sleeper API doesn't require authentication
+        apiKey = undefined
+        break
+      default:
+        throw new Error(`Unsupported service: ${service}`)
+    }
+
+    // Build the request headers
+    const requestHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      ...headers,
+    }
+
+    // Add API key to headers or URL based on service
+    let finalEndpoint = endpoint
+    if (apiKey) {
+      if (service.startsWith('google-')) {
+        // Google APIs typically use query parameter
+        finalEndpoint += (endpoint.includes('?') ? '&' : '?') + `key=${apiKey}`
+      } else {
+        // Other APIs might use Authorization header
+        requestHeaders['Authorization'] = `Bearer ${apiKey}`
+      }
+    }
+
+    // Add service account if available (for OAuth2 flows)
+    if (serviceAccountKey) {
+      // This would typically involve JWT generation for service accounts
+      // Implementation depends on specific service requirements
+      console.log('Service account authentication available')
+    }
+
+    // Make the proxied request
+    const requestOptions: RequestInit = {
+      method,
+      headers: requestHeaders,
+    }
+
+    if (body && method !== 'GET') {
+      requestOptions.body = JSON.stringify(body)
+    }
+
+    const response = await fetch(finalEndpoint, requestOptions)
+
+    // Parse the response
+    let responseData: any
+    const contentType = response.headers.get('content-type')
+    
+    if (contentType?.includes('application/json')) {
+      responseData = await response.json()
+    } else {
+      responseData = await response.text()
+    }
+
+    // Return the response
+    return new Response(
+      JSON.stringify({ 
+        success: response.ok,
+        status: response.status,
+        data: responseData 
+      }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: response.ok ? 200 : response.status,
+      }
+    )
+  } catch (error) {
+    console.error('Error in secure-api-proxy function:', error)
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: error.message || 'An error occurred',
+        details: error.toString()
+      }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400,
+      }
+    )
+  }
+})
+
+/* To invoke:
+
+  curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/secure-api-proxy' \
+    --header 'Authorization: Bearer YOUR_ANON_KEY' \
+    --header 'Content-Type: application/json' \
+    --data '{
+      "service": "google-docs",
+      "endpoint": "https://docs.googleapis.com/v1/documents/YOUR_DOC_ID",
+      "method": "GET"
+    }'
+
+*/

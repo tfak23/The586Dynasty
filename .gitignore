@@ -54,3 +54,10 @@ coverage/
 # ======================
 .cache/
 .tmp/
+
+# ======================
+# Supabase
+# ======================
+supabase/.branches/
+supabase/.temp/
+.supabase/
