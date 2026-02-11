@@ -37,7 +37,7 @@ export async function callSupabaseFunction<T = any>(
     const client = getSupabaseClient();
 
     const { data, error } = await client.functions.invoke(functionName, {
-      body: JSON.stringify(body),
+      body: body,
     });
 
     if (error) {

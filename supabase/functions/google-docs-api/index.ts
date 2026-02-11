@@ -21,10 +21,9 @@ serve(async (req) => {
   try {
     // Get the Google Docs API key from environment variables (set in Supabase dashboard)
     const GOOGLE_DOCS_API_KEY = Deno.env.get('GOOGLE_DOCS_API_KEY')
-    const GOOGLE_DOCS_SERVICE_ACCOUNT = Deno.env.get('GOOGLE_DOCS_SERVICE_ACCOUNT')
     
-    if (!GOOGLE_DOCS_API_KEY || !GOOGLE_DOCS_SERVICE_ACCOUNT) {
-      throw new Error('Google Docs API credentials not configured. Please set GOOGLE_DOCS_API_KEY and GOOGLE_DOCS_SERVICE_ACCOUNT in Supabase dashboard.')
+    if (!GOOGLE_DOCS_API_KEY) {
+      throw new Error('Google Docs API key not configured. Please set GOOGLE_DOCS_API_KEY in Supabase dashboard.')
     }
 
     // Parse the request body

@@ -239,6 +239,81 @@ supabase secrets list
 
 ---
 
+## Security Considerations for API Keys
+
+### Google API Authentication Methods
+
+When working with Google APIs (Docs, Sheets, etc.), there are different authentication methods:
+
+1. **API Keys** (Simple, suitable for development)
+   - Passed as query parameters: `?key=YOUR_API_KEY`
+   - ⚠️ May appear in server logs
+   - ✅ Suitable for public or read-only data
+   - ✅ Simple to implement and use
+   - Best for: Development, testing, public data access
+
+2. **OAuth 2.0** (User-specific access)
+   - Uses Authorization header: `Authorization: Bearer ACCESS_TOKEN`
+   - ✅ User-specific permissions
+   - ✅ No keys in query strings
+   - Requires: User login flow
+   - Best for: User-specific data, interactive applications
+
+3. **Service Accounts** (Server-to-server)
+   - Uses JWT tokens in Authorization header
+   - ✅ Most secure for server applications
+   - ✅ No user interaction needed
+   - ✅ Scoped permissions
+   - Requires: Service account JSON key, JWT generation
+   - Best for: Production server applications, automated tasks
+
+### Security Best Practices
+
+1. **Restrict API Keys** in Google Cloud Console:
+   - Limit to specific APIs (e.g., only Google Docs API)
+   - Restrict to specific HTTP referrers or IP addresses
+   - Set usage quotas to prevent abuse
+   - Rotate keys regularly
+
+2. **Use Appropriate Method** for your use case:
+   - Development: API keys (simpler)
+   - Production: Service accounts (more secure)
+   - User data: OAuth 2.0 (user permissions)
+
+3. **Monitor Usage**:
+   - Check Google Cloud Console for unusual activity
+   - Set up billing alerts
+   - Review API usage logs regularly
+
+4. **Defense in Depth**:
+   - API keys stored in Supabase (not in client code) ✅
+   - Supabase Edge Functions act as proxy ✅
+   - Additional authentication on Edge Functions (optional)
+   - Rate limiting in Edge Functions (optional)
+
+### Current Implementation
+
+This implementation uses **API keys** for simplicity, which is appropriate for:
+- Development and testing
+- Internal tools
+- Read-only or public data access
+
+For production applications handling sensitive data, consider upgrading to **Service Accounts**. See the "Advanced Topics" section below for implementation guidance.
+
+### Upgrading to Service Accounts (Advanced)
+
+To upgrade from API keys to service accounts:
+
+1. Create a service account in Google Cloud Console
+2. Download the JSON key file
+3. Store it as a Supabase secret: `supabase secrets set GOOGLE_SERVICE_ACCOUNT="$(cat key.json)"`
+4. Implement JWT generation in your Edge Function
+5. Use the JWT token in the Authorization header
+
+Example JWT generation code is available in the Supabase documentation.
+
+---
+
 ## Deploying Edge Functions
 
 ### Understanding Edge Functions

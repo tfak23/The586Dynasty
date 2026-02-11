@@ -25,16 +25,13 @@ serve(async (req) => {
 
     // Get the appropriate API key based on the service
     let apiKey: string | undefined
-    let serviceAccountKey: string | undefined
 
     switch (service) {
       case 'google-docs':
         apiKey = Deno.env.get('GOOGLE_DOCS_API_KEY')
-        serviceAccountKey = Deno.env.get('GOOGLE_DOCS_SERVICE_ACCOUNT')
         break
       case 'google-sheets':
         apiKey = Deno.env.get('GOOGLE_SHEETS_API_KEY')
-        serviceAccountKey = Deno.env.get('GOOGLE_SHEETS_SERVICE_ACCOUNT')
         break
       case 'custom':
         apiKey = Deno.env.get('CUSTOM_API_KEY')
@@ -58,19 +55,14 @@ serve(async (req) => {
     let finalEndpoint = endpoint
     if (apiKey) {
       if (service.startsWith('google-')) {
-        // Google APIs typically use query parameter
+        // Google APIs with API keys use query parameter (standard method)
+        // Note: For production, consider using OAuth2 service accounts instead
+        // which use Authorization headers and provide better security
         finalEndpoint += (endpoint.includes('?') ? '&' : '?') + `key=${apiKey}`
       } else {
-        // Other APIs might use Authorization header
+        // Other APIs typically use Authorization header
         requestHeaders['Authorization'] = `Bearer ${apiKey}`
       }
-    }
-
-    // Add service account if available (for OAuth2 flows)
-    if (serviceAccountKey) {
-      // This would typically involve JWT generation for service accounts
-      // Implementation depends on specific service requirements
-      console.log('Service account authentication available')
     }
 
     // Make the proxied request
