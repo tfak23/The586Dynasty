@@ -1,5 +1,5 @@
-import bcrypt from 'bcrypt';
-import crypto from 'crypto';
+import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 
 const SALT_ROUNDS = 10;

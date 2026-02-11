@@ -43,7 +43,7 @@ router.get('/discover', authenticateToken, async (req: Request, res: Response) =
       [leagueIds]
     );
 
-    const registeredMap = new Map(
+    const registeredMap = new Map<string, any>(
       registeredLeagues.rows.map(l => [l.sleeper_league_id, l])
     );
 
@@ -72,12 +72,12 @@ router.get('/discover', authenticateToken, async (req: Request, res: Response) =
         total_rosters: league.total_rosters,
         status: league.status,
         is_registered: !!registered,
-        is_salary_cap_league: registered?.is_salary_cap_league || false,
-        app_league_id: registered?.id,
+        is_salary_cap_league: registered ? registered.is_salary_cap_league : false,
+        app_league_id: registered ? registered.id : undefined,
         user_status: isJoined ? 'joined' : 'not_joined',
         action: isJoined 
           ? 'already_joined'
-          : registered?.is_salary_cap_league 
+          : (registered && registered.is_salary_cap_league)
             ? 'join_league' 
             : 'convert_to_salary_cap',
       };
