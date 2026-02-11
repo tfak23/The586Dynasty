@@ -55,10 +55,13 @@ serve(async (req) => {
     let finalEndpoint = endpoint
     if (apiKey) {
       if (service.startsWith('google-')) {
-        // Google APIs with API keys use query parameter (standard method)
-        // Note: For production, consider using OAuth2 service accounts instead
-        // which use Authorization headers and provide better security
+        // ⚠️ SECURITY NOTE: Google APIs with API keys use query parameter (standard method)
+        // This is suitable for development but API keys may appear in server logs.
+        // For production applications with sensitive data, upgrade to OAuth2 Service Accounts
+        // which use Authorization headers and provide better security.
+        // See SUPABASE_SETUP.md "Security Considerations" section for details.
         finalEndpoint += (endpoint.includes('?') ? '&' : '?') + `key=${apiKey}`
+        console.log('Using Google API key authentication (development mode)')
       } else {
         // Other APIs typically use Authorization header
         requestHeaders['Authorization'] = `Bearer ${apiKey}`
