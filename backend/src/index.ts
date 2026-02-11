@@ -12,6 +12,8 @@ import { tradeHistoryRoutes } from './routes/tradeHistory.js';
 import { playerRoutes } from './routes/players.js';
 import { syncRoutes } from './routes/sync.js';
 import { importRoutes } from './routes/import.js';
+import { authRoutes } from './routes/auth.js';
+import { userLeaguesRoutes } from './routes/userLeagues.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { syncAllLeagueRosters } from './jobs/syncRosters.js';
 import { syncPlayerStats } from './services/statsSync.js';
@@ -37,6 +39,8 @@ app.get('/api/health', (req, res) => {
 });
 
 // API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/user-leagues', userLeaguesRoutes);
 app.use('/api/leagues', leagueRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/contracts', contractRoutes);
