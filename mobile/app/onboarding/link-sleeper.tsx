@@ -10,7 +10,7 @@ const showAlert = (title: string, message?: string, buttons?: any[]) => {
     window.alert(`${title}${message ? '\n' + message : ''}`);
     if (buttons?.[0]?.onPress) buttons[0].onPress();
   } else {
-    showAlert(title, message, buttons);
+    Alert.alert(title, message, buttons);
   }
 };
 
@@ -35,12 +35,22 @@ export default function LinkSleeperScreen() {
 
       setLoading(false);
 
-      // When edge function returns non-2xx, error is set and data contains the response body
+      // In supabase-js v2, non-2xx responses set error (FunctionsHttpError) and data is null.
+      // The actual response body must be read from error.context.
       if (error) {
         console.error('Edge function error:', error);
-        // Try to get the actual error message from data (response body)
-        const errorMsg = data?.error || error.message || 'Failed to link Sleeper account';
-        const errorCode = data?.code;
+        let errorMsg = 'Failed to link Sleeper account';
+        let errorCode = '';
+        try {
+          // error.context is a Response object — read the JSON body
+          const errorBody = await (error as any).context?.json?.();
+          if (errorBody) {
+            errorMsg = errorBody.error || errorMsg;
+            errorCode = errorBody.code || '';
+          }
+        } catch {
+          errorMsg = error.message || errorMsg;
+        }
         if (errorCode === 'SLEEPER_USERNAME_TAKEN') {
           showAlert('Username Already Linked', 'This Sleeper username is already linked to another account.');
         } else if (errorCode === 'SLEEPER_USER_NOT_FOUND') {
@@ -52,12 +62,13 @@ export default function LinkSleeperScreen() {
       }
 
       if (data?.error) {
-        if (data.code === 'SLEEPER_USERNAME_TAKEN') {
+        const errorCode = data.code || '';
+        if (errorCode === 'SLEEPER_USERNAME_TAKEN') {
           showAlert(
             'Username Already Linked',
             'This Sleeper username is already linked to another account. Each Sleeper account can only be linked once.'
           );
-        } else if (data.code === 'SLEEPER_USER_NOT_FOUND') {
+        } else if (errorCode === 'SLEEPER_USER_NOT_FOUND') {
           showAlert(
             'Username Not Found',
             'This Sleeper username does not exist. Please check your spelling and try again.'

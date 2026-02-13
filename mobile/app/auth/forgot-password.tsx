@@ -8,7 +8,7 @@ const showAlert = (title: string, message?: string, buttons?: any[]) => {
     window.alert(`${title}${message ? '\n' + message : ''}`);
     if (buttons?.[0]?.onPress) buttons[0].onPress();
   } else {
-    showAlert(title, message, buttons);
+    Alert.alert(title, message, buttons);
   }
 };
 
