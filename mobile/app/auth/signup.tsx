@@ -28,15 +28,19 @@ export default function SignUpScreen() {
     }
 
     setLoading(true);
-    const { error } = await signUp(email, password);
+    const { error, data } = await signUp(email, password);
     setLoading(false);
 
     if (error) {
       Alert.alert('Sign Up Failed', error.message);
+    } else if (data?.session) {
+      // Email confirmation is disabled — user is immediately signed in
+      // Navigation is handled automatically by AuthContext/layout
     } else {
+      // Email confirmation is enabled — tell user to check their email
       Alert.alert(
-        'Success',
-        'Account created! Please check your email to verify your account.',
+        'Check Your Email',
+        'We sent a confirmation link to your email. Please verify your account before signing in.',
         [{ text: 'OK', onPress: () => router.replace('/auth/login') }]
       );
     }
