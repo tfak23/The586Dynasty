@@ -1,7 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
+
+const showAlert = (title: string, message?: string, buttons?: any[]) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}${message ? '\n' + message : ''}`);
+    if (buttons?.[0]?.onPress) buttons[0].onPress();
+  } else {
+    showAlert(title, message, buttons);
+  }
+};
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
@@ -12,7 +21,7 @@ export default function ForgotPasswordScreen() {
 
   const handleResetPassword = async () => {
     if (!email) {
-      Alert.alert('Error', 'Please enter your email address');
+      showAlert('Error', 'Please enter your email address');
       return;
     }
 
@@ -21,7 +30,7 @@ export default function ForgotPasswordScreen() {
     setLoading(false);
 
     if (error) {
-      Alert.alert('Error', error.message);
+      showAlert('Error', error.message);
     } else {
       setSent(true);
     }

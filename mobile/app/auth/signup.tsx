@@ -1,7 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
+
+const showAlert = (title: string, message?: string, buttons?: any[]) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}${message ? '\n' + message : ''}`);
+    if (buttons?.[0]?.onPress) buttons[0].onPress();
+  } else {
+    showAlert(title, message, buttons);
+  }
+};
 
 export default function SignUpScreen() {
   const router = useRouter();
@@ -13,17 +22,17 @@ export default function SignUpScreen() {
 
   const handleSignUp = async () => {
     if (!email || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
+      showAlert('Error', 'Please fill in all fields');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      showAlert('Error', 'Passwords do not match');
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+      showAlert('Error', 'Password must be at least 6 characters');
       return;
     }
 
@@ -32,13 +41,13 @@ export default function SignUpScreen() {
     setLoading(false);
 
     if (error) {
-      Alert.alert('Sign Up Failed', error.message);
+      showAlert('Sign Up Failed', error.message);
     } else if (data?.session) {
       // Email confirmation is disabled — user is immediately signed in
       // Navigation is handled automatically by AuthContext/layout
     } else {
       // Email confirmation is enabled — tell user to check their email
-      Alert.alert(
+      showAlert(
         'Check Your Email',
         'We sent a confirmation link to your email. Please verify your account before signing in.',
         [{ text: 'OK', onPress: () => router.replace('/auth/login') }]
@@ -52,7 +61,7 @@ export default function SignUpScreen() {
     setLoading(false);
 
     if (error) {
-      Alert.alert('Google Sign Up Failed', error.message);
+      showAlert('Google Sign Up Failed', error.message);
     }
   };
 

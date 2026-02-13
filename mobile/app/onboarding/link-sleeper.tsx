@@ -1,8 +1,18 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase';
+
+// Alert.alert doesn't work on web — use window.alert as fallback
+const showAlert = (title: string, message?: string, buttons?: any[]) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}${message ? '\n' + message : ''}`);
+    if (buttons?.[0]?.onPress) buttons[0].onPress();
+  } else {
+    showAlert(title, message, buttons);
+  }
+};
 
 export default function LinkSleeperScreen() {
   const router = useRouter();
@@ -12,7 +22,7 @@ export default function LinkSleeperScreen() {
 
   const handleLinkAccount = async () => {
     if (!username || username.trim() === '') {
-      Alert.alert('Error', 'Please enter your Sleeper username');
+      showAlert('Error', 'Please enter your Sleeper username');
       return;
     }
 
@@ -26,23 +36,25 @@ export default function LinkSleeperScreen() {
       setLoading(false);
 
       if (error) {
-        Alert.alert('Error', error.message || 'Failed to link Sleeper account');
+        console.error('Edge function error:', error);
+        showAlert('Error', error.message || 'Failed to link Sleeper account');
         return;
       }
 
-      if (!data.success) {
+      // Edge functions return error responses in data (not error) for non-2xx
+      if (data?.error) {
         if (data.code === 'SLEEPER_USERNAME_TAKEN') {
-          Alert.alert(
+          showAlert(
             'Username Already Linked',
             'This Sleeper username is already linked to another account. Each Sleeper account can only be linked once.'
           );
         } else if (data.code === 'SLEEPER_USER_NOT_FOUND') {
-          Alert.alert(
+          showAlert(
             'Username Not Found',
             'This Sleeper username does not exist. Please check your spelling and try again.'
           );
         } else {
-          Alert.alert('Error', data.error || 'Failed to link Sleeper account');
+          showAlert('Error', data.error || 'Failed to link Sleeper account');
         }
         return;
       }
@@ -51,7 +63,7 @@ export default function LinkSleeperScreen() {
       await refreshProfile();
 
       // Success - navigate to league selection
-      Alert.alert(
+      showAlert(
         'Success!',
         `Your Sleeper account (@${username}) has been linked successfully.`,
         [
@@ -63,7 +75,8 @@ export default function LinkSleeperScreen() {
       );
     } catch (err: any) {
       setLoading(false);
-      Alert.alert('Error', err.message || 'An unexpected error occurred');
+      console.error('Link account error:', err);
+      showAlert('Error', err.message || 'An unexpected error occurred');
     }
   };
 
