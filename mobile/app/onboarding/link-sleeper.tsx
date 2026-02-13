@@ -35,13 +35,22 @@ export default function LinkSleeperScreen() {
 
       setLoading(false);
 
+      // When edge function returns non-2xx, error is set and data contains the response body
       if (error) {
         console.error('Edge function error:', error);
-        showAlert('Error', error.message || 'Failed to link Sleeper account');
+        // Try to get the actual error message from data (response body)
+        const errorMsg = data?.error || error.message || 'Failed to link Sleeper account';
+        const errorCode = data?.code;
+        if (errorCode === 'SLEEPER_USERNAME_TAKEN') {
+          showAlert('Username Already Linked', 'This Sleeper username is already linked to another account.');
+        } else if (errorCode === 'SLEEPER_USER_NOT_FOUND') {
+          showAlert('Username Not Found', 'This Sleeper username does not exist. Please check your spelling.');
+        } else {
+          showAlert('Error', errorMsg);
+        }
         return;
       }
 
-      // Edge functions return error responses in data (not error) for non-2xx
       if (data?.error) {
         if (data.code === 'SLEEPER_USERNAME_TAKEN') {
           showAlert(

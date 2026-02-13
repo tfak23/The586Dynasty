@@ -19,21 +19,27 @@ serve(async (req) => {
   }
 
   try {
-    // Get authenticated user
+    // Auth client — to verify the user's JWT
     const authHeader = req.headers.get('Authorization')!
-    const supabase = createClient(
+    const authClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       { global: { headers: { Authorization: authHeader } } }
     )
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    const { data: { user }, error: userError } = await authClient.auth.getUser()
     if (userError || !user) {
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
+
+    // Admin client — bypasses RLS so we can check all profiles and upsert
+    const adminClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
 
     // Parse request
     const { sleeper_username }: RequestBody = await req.json()
@@ -46,7 +52,7 @@ serve(async (req) => {
     }
 
     // Check if sleeper username is already linked to another account
-    const { data: existingProfile, error: checkError } = await supabase
+    const { data: existingProfile, error: checkError } = await adminClient
       .from('user_profiles')
       .select('id, sleeper_username')
       .eq('sleeper_username', sleeper_username)
@@ -55,14 +61,14 @@ serve(async (req) => {
     if (checkError) {
       console.error('Error checking existing profile:', checkError)
       return new Response(
-        JSON.stringify({ error: 'Database error checking username' }),
+        JSON.stringify({ error: 'Database error checking username: ' + checkError.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
     if (existingProfile && existingProfile.id !== user.id) {
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           error: 'This Sleeper username is already linked to another account',
           code: 'SLEEPER_USERNAME_TAKEN'
         }),
@@ -72,28 +78,31 @@ serve(async (req) => {
 
     // Fetch Sleeper user data to validate username exists
     const sleeperResponse = await fetch(`https://api.sleeper.app/v1/user/${sleeper_username}`)
-    
-    if (!sleeperResponse.ok) {
-      if (sleeperResponse.status === 404) {
-        return new Response(
-          JSON.stringify({ 
-            error: 'Sleeper username not found',
-            code: 'SLEEPER_USER_NOT_FOUND'
-          }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      
+
+    if (!sleeperResponse.ok || sleeperResponse.status === 404) {
       return new Response(
-        JSON.stringify({ error: 'Failed to validate Sleeper username' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({
+          error: 'Sleeper username not found. Please check spelling.',
+          code: 'SLEEPER_USER_NOT_FOUND'
+        }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
     const sleeperUser = await sleeperResponse.json()
 
-    // Update or create user profile with Sleeper data
-    const { data: profile, error: profileError } = await supabase
+    if (!sleeperUser || !sleeperUser.user_id) {
+      return new Response(
+        JSON.stringify({
+          error: 'Sleeper username not found. Please check spelling.',
+          code: 'SLEEPER_USER_NOT_FOUND'
+        }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Update or create user profile with Sleeper data (using admin client to bypass RLS)
+    const { data: profile, error: profileError } = await adminClient
       .from('user_profiles')
       .upsert({
         id: user.id,
@@ -111,13 +120,13 @@ serve(async (req) => {
     if (profileError) {
       console.error('Error updating profile:', profileError)
       return new Response(
-        JSON.stringify({ error: 'Failed to link Sleeper account' }),
+        JSON.stringify({ error: 'Failed to link Sleeper account: ' + profileError.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         success: true,
         profile: profile,
         message: 'Sleeper account linked successfully'
