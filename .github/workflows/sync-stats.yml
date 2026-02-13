@@ -1,0 +1,19 @@
+name: Sync Stats (Cron)
+
+on:
+  schedule:
+    - cron: '0 6 * * 2' # Tuesdays at 6:00 AM UTC
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call sync-stats Edge Function
+        run: |
+          CURRENT_YEAR=$(date +%Y)
+          curl -s -X POST \
+            "${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}/functions/v1/sync-stats" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"season\": $CURRENT_YEAR}"
