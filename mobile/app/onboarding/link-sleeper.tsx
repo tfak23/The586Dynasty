@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase';
 
 // Alert.alert doesn't work on web — use window.alert as fallback
 const showAlert = (title: string, message?: string, buttons?: any[]) => {
@@ -29,52 +29,41 @@ export default function LinkSleeperScreen() {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('sleeper-link-account', {
-        body: { sleeper_username: username.trim() }
-      });
+      // Get the current session for the auth token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setLoading(false);
+        showAlert('Error', 'You must be logged in to link your Sleeper account.');
+        return;
+      }
 
+      // Call edge function directly with fetch for reliable error handling
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/sleeper-link-account`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+            'apikey': supabaseAnonKey,
+          },
+          body: JSON.stringify({ sleeper_username: username.trim() }),
+        }
+      );
+
+      const result = await response.json();
       setLoading(false);
 
-      // In supabase-js v2, non-2xx responses set error (FunctionsHttpError) and data is null.
-      // The actual response body must be read from error.context.
-      if (error) {
-        console.error('Edge function error:', error);
-        let errorMsg = 'Failed to link Sleeper account';
-        let errorCode = '';
-        try {
-          // error.context is a Response object — read the JSON body
-          const errorBody = await (error as any).context?.json?.();
-          if (errorBody) {
-            errorMsg = errorBody.error || errorMsg;
-            errorCode = errorBody.code || '';
-          }
-        } catch {
-          errorMsg = error.message || errorMsg;
-        }
+      if (!response.ok) {
+        console.error('Edge function error:', response.status, result);
+        const errorCode = result?.code || '';
+        const errorMsg = result?.error || 'Failed to link Sleeper account';
         if (errorCode === 'SLEEPER_USERNAME_TAKEN') {
           showAlert('Username Already Linked', 'This Sleeper username is already linked to another account.');
         } else if (errorCode === 'SLEEPER_USER_NOT_FOUND') {
           showAlert('Username Not Found', 'This Sleeper username does not exist. Please check your spelling.');
         } else {
           showAlert('Error', errorMsg);
-        }
-        return;
-      }
-
-      if (data?.error) {
-        const errorCode = data.code || '';
-        if (errorCode === 'SLEEPER_USERNAME_TAKEN') {
-          showAlert(
-            'Username Already Linked',
-            'This Sleeper username is already linked to another account. Each Sleeper account can only be linked once.'
-          );
-        } else if (errorCode === 'SLEEPER_USER_NOT_FOUND') {
-          showAlert(
-            'Username Not Found',
-            'This Sleeper username does not exist. Please check your spelling and try again.'
-          );
-        } else {
-          showAlert('Error', data.error || 'Failed to link Sleeper account');
         }
         return;
       }
