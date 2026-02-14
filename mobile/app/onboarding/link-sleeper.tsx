@@ -29,11 +29,11 @@ export default function LinkSleeperScreen() {
     setLoading(true);
 
     try {
-      // Get the current session for the auth token
-      const { data: { session } } = await supabase.auth.getSession();
+      // Force refresh to get a valid (non-expired) access token
+      const { data: { session } } = await supabase.auth.refreshSession();
       if (!session) {
         setLoading(false);
-        showAlert('Error', 'You must be logged in to link your Sleeper account.');
+        showAlert('Error', 'Your session has expired. Please log in again.');
         return;
       }
 
