@@ -1,7 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
+
+// Web-compatible alert helpers
+const showAlert = (title: string, message?: string, buttons?: any[]) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}${message ? '\n' + message : ''}`);
+    if (buttons?.[0]?.onPress) buttons[0].onPress();
+  } else {
+    Alert.alert(title, message, buttons);
+  }
+};
+
+const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n${message}`)) {
+      onConfirm();
+    }
+  } else {
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'OK', onPress: onConfirm },
+    ]);
+  }
+};
 
 interface League {
   sleeper_league_id: string;
@@ -32,20 +55,20 @@ export default function SelectLeagueScreen() {
       const { data, error } = await supabase.functions.invoke('sleeper-get-leagues');
 
       if (error) {
-        Alert.alert('Error', 'Failed to fetch your leagues');
+        showAlert('Error', 'Failed to fetch your leagues');
         setLoading(false);
         return;
       }
 
       if (!data.success) {
         if (data.code === 'NO_SLEEPER_ACCOUNT') {
-          Alert.alert(
+          showAlert(
             'No Sleeper Account',
             'Please link your Sleeper account first',
             [{ text: 'OK', onPress: () => router.replace('/onboarding/link-sleeper') }]
           );
         } else {
-          Alert.alert('Error', data.error || 'Failed to fetch leagues');
+          showAlert('Error', data.error || 'Failed to fetch leagues');
         }
         setLoading(false);
         return;
@@ -53,106 +76,94 @@ export default function SelectLeagueScreen() {
 
       setLeagues(data.leagues || []);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to fetch leagues');
+      showAlert('Error', err.message || 'Failed to fetch leagues');
     } finally {
       setLoading(false);
     }
   };
 
   const handleConvertLeague = async (league: League) => {
-    Alert.alert(
+    showConfirm(
       'Convert League',
       `Convert "${league.name}" to a salary cap league? You will become the commissioner.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Convert',
-          onPress: async () => {
-            setProcessing(league.sleeper_league_id);
-            try {
-              const { data, error } = await supabase.functions.invoke('league-convert', {
-                body: { sleeper_league_id: league.sleeper_league_id }
-              });
+      async () => {
+        setProcessing(league.sleeper_league_id);
+        try {
+          const { data, error } = await supabase.functions.invoke('league-convert', {
+            body: { sleeper_league_id: league.sleeper_league_id }
+          });
 
-              setProcessing(null);
+          setProcessing(null);
 
-              if (error) {
-                Alert.alert('Error', error.message || 'Failed to convert league');
-                return;
-              }
-
-              if (!data.success) {
-                Alert.alert('Error', data.error || 'Failed to convert league');
-                return;
-              }
-
-              Alert.alert(
-                'Success!',
-                `"${league.name}" has been converted to a salary cap league. You are now the commissioner!`,
-                [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
-              );
-            } catch (err: any) {
-              setProcessing(null);
-              Alert.alert('Error', err.message || 'Failed to convert league');
-            }
+          if (error) {
+            showAlert('Error', error.message || 'Failed to convert league');
+            return;
           }
+
+          if (!data.success) {
+            showAlert('Error', data.error || 'Failed to convert league');
+            return;
+          }
+
+          showAlert(
+            'Success!',
+            `"${league.name}" has been converted to a salary cap league. You are now the commissioner!`,
+            [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+          );
+        } catch (err: any) {
+          setProcessing(null);
+          showAlert('Error', err.message || 'Failed to convert league');
         }
-      ]
+      }
     );
   };
 
   const handleJoinLeague = async (league: League) => {
-    Alert.alert(
+    showConfirm(
       'Join League',
       `Join "${league.name}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Join',
-          onPress: async () => {
-            setProcessing(league.sleeper_league_id);
-            try {
-              const { data, error } = await supabase.functions.invoke('league-join', {
-                body: { sleeper_league_id: league.sleeper_league_id }
-              });
+      async () => {
+        setProcessing(league.sleeper_league_id);
+        try {
+          const { data, error } = await supabase.functions.invoke('league-join', {
+            body: { sleeper_league_id: league.sleeper_league_id }
+          });
 
-              setProcessing(null);
+          setProcessing(null);
 
-              if (error) {
-                Alert.alert('Error', error.message || 'Failed to join league');
-                return;
-              }
+          if (error) {
+            showAlert('Error', error.message || 'Failed to join league');
+            return;
+          }
 
-              if (!data.success) {
-                if (data.code === 'ALREADY_MEMBER') {
-                  Alert.alert(
-                    'Already a Member',
-                    'You are already a member of this league',
-                    [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
-                  );
-                } else if (data.code === 'NOT_IN_SLEEPER_LEAGUE') {
-                  Alert.alert(
-                    'Not in League',
-                    'You are not a member of this league on Sleeper'
-                  );
-                } else {
-                  Alert.alert('Error', data.error || 'Failed to join league');
-                }
-                return;
-              }
-
-              Alert.alert(
-                'Success!',
-                `You've joined "${league.name}"!`,
+          if (!data.success) {
+            if (data.code === 'ALREADY_MEMBER') {
+              showAlert(
+                'Already a Member',
+                'You are already a member of this league',
                 [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
               );
-            } catch (err: any) {
-              setProcessing(null);
-              Alert.alert('Error', err.message || 'Failed to join league');
+            } else if (data.code === 'NOT_IN_SLEEPER_LEAGUE') {
+              showAlert(
+                'Not in League',
+                'You are not a member of this league on Sleeper'
+              );
+            } else {
+              showAlert('Error', data.error || 'Failed to join league');
             }
+            return;
           }
+
+          showAlert(
+            'Success!',
+            `You've joined "${league.name}"!`,
+            [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+          );
+        } catch (err: any) {
+          setProcessing(null);
+          showAlert('Error', err.message || 'Failed to join league');
         }
-      ]
+      }
     );
   };
 
