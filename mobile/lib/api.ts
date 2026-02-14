@@ -817,6 +817,12 @@ export const syncPlayers = async () => {
   return wrap(data);
 };
 
+export const syncToSheet = async (leagueId: string) => {
+  const { data, error } = await supabase.functions.invoke('sheet-sync', { body: { league_id: leagueId, action: 'full-reconciliation' } });
+  if (error) throw new Error(error.message);
+  return wrap(data);
+};
+
 // =============================================
 // IMPORT (via Edge Function)
 // =============================================

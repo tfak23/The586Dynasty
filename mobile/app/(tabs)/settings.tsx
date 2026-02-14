@@ -4,7 +4,7 @@ import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
-import { syncLeague, syncRosters, syncPlayers, syncStats, getLastSyncTime } from '@/lib/api';
+import { syncLeague, syncRosters, syncPlayers, syncStats, syncToSheet, getLastSyncTime } from '@/lib/api';
 import { useAppStore, DEFAULT_ROOKIE_VALUES, SUGGESTED_4_ROUND_VALUES, SUGGESTED_5_ROUND_VALUES } from '@/lib/store';
 import { useAuth } from '@/lib/AuthContext';
 
@@ -103,6 +103,22 @@ export default function SettingsScreen() {
     },
     onError: (error: any) => {
       showAlert('Error', error.message || 'Failed to sync');
+    },
+  });
+
+  // Google Sheet sync mutation
+  const sheetSyncMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentLeague) throw new Error('No league connected');
+      return syncToSheet(currentLeague.id);
+    },
+    onSuccess: (res) => {
+      const data = res.data.data;
+      const teamCount = data?.teams_synced || 0;
+      showAlert('Success', `Google Sheet synced!\n${teamCount} team tabs updated.`);
+    },
+    onError: (error: any) => {
+      showAlert('Error', error.message || 'Failed to sync Google Sheet');
     },
   });
 
@@ -250,6 +266,29 @@ export default function SettingsScreen() {
                   </Text>
                 </TouchableOpacity>
               </View>
+            </View>
+
+            {/* Google Sheet Sync */}
+            <View style={styles.advancedSyncSection}>
+              <Text style={styles.advancedSyncTitle}>Google Sheet Sync</Text>
+              <Text style={styles.advancedSyncHint}>
+                Full reconciliation — rebuilds all team tabs and Master Roster from the database.
+              </Text>
+
+              <TouchableOpacity
+                style={sheetSyncMutation.isPending ? styles.syncButtonDisabled : styles.sheetSyncButton}
+                onPress={() => sheetSyncMutation.mutate()}
+                disabled={sheetSyncMutation.isPending}
+              >
+                {sheetSyncMutation.isPending ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Ionicons name="document-text-outline" size={18} color={colors.white} />
+                )}
+                <Text style={styles.syncButtonText}>
+                  {sheetSyncMutation.isPending ? 'Syncing Sheet...' : 'Sync to Google Sheet'}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -720,6 +759,14 @@ const styles = StyleSheet.create({
   advancedSyncButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  sheetSyncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0F9D58',
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
   },
   smallSyncButton: {
     flexDirection: 'row',

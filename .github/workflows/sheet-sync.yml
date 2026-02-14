@@ -1,0 +1,18 @@
+name: Sheet Sync (Cron)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *' # Every 15 minutes
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call sheet-sync Edge Function (differential)
+        run: |
+          curl -s -X POST \
+            "${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}/functions/v1/sheet-sync" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"action": "differential-sync"}'

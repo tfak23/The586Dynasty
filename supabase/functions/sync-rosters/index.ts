@@ -1,8 +1,10 @@
 // Supabase Edge Function for Roster Sync
 // Fetches rosters from Sleeper API, detects dropped players, applies dead cap
+// Also updates Google Sheet when players are dropped
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.3"
+import { sheetRemovePlayer } from '../_shared/sheet-operations.ts'
 
 const SLEEPER_API_BASE = 'https://api.sleeper.app/v1'
 
@@ -66,6 +68,7 @@ serve(async (req) => {
       if (!teams) continue
 
       const releasedContracts: any[] = []
+      const sheetDetails: string[] = []
 
       for (const roster of rosters) {
         const team = teams.find((t: any) => t.sleeper_roster_id === roster.roster_id)
@@ -109,6 +112,21 @@ serve(async (req) => {
               })
             }
 
+            // Update Google Sheet (non-blocking)
+            try {
+              const deadCapByYear: Record<number, number> = {}
+              deadCapByYear[currentSeason] = deadCap
+              const sheetResult = await sheetRemovePlayer({
+                playerName: contract.players.full_name,
+                ownerName: team.owner_name,
+                deadCapByYear,
+                reason: 'dropped',
+              })
+              sheetDetails.push(...sheetResult.details)
+            } catch (sheetErr) {
+              sheetDetails.push(`Sheet sync failed for ${contract.players.full_name}: ${(sheetErr as Error).message}`)
+            }
+
             releasedContracts.push({
               team_name: team.team_name,
               player_name: contract.players.full_name,
@@ -135,6 +153,7 @@ serve(async (req) => {
         league_name: league.name,
         players_released: releasedContracts.length,
         released_contracts: releasedContracts,
+        sheet_details: sheetDetails,
       })
     }
 

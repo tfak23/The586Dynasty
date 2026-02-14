@@ -1,12 +1,104 @@
 // Supabase Edge Function for Trade Actions
 // Handles: accept, reject, vote, commissioner-approve, cancel, withdraw
+// Also syncs completed trades to Google Sheet
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.95.3"
+import { sheetExecuteTrade } from '../_shared/sheet-operations.ts'
+import { resolveTabName } from '../_shared/sheet-mapping.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+// Sync a completed trade to the Google Sheet
+async function syncTradeToSheet(supabase: any, tradeId: string) {
+  try {
+    // Fetch trade with full details
+    const { data: trade } = await supabase
+      .from('trades')
+      .select('*, trade_teams(*, teams(team_name, owner_name)), trade_assets(*, contracts(salary, start_season, end_season, years_remaining, contract_type, players(full_name, position)))')
+      .eq('id', tradeId)
+      .single()
+
+    if (!trade || !trade.trade_teams || trade.trade_teams.length < 2) return []
+
+    const team1 = trade.trade_teams[0]
+    const team2 = trade.trade_teams[1]
+
+    // Get trade history for trade number
+    const { data: history } = await supabase
+      .from('trade_history')
+      .select('trade_number')
+      .eq('league_id', trade.league_id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    // Generate trade number if no history exists
+    const currentYear = new Date().getFullYear()
+    const shortYear = currentYear - 2000 // e.g., 26
+    let tradeNumber = `${shortYear}.01`
+    if (history?.trade_number) {
+      const parts = history.trade_number.split('.')
+      const num = parseInt(parts[1] || '0') + 1
+      tradeNumber = `${parts[0]}.${num.toString().padStart(2, '0')}`
+    }
+
+    // Separate assets by team
+    const team1Received = (trade.trade_assets || [])
+      .filter((a: any) => a.receiving_team_id === team1.team_id)
+      .map((a: any) => ({
+        type: a.asset_type,
+        name: a.contracts?.players?.full_name || a.description,
+        salary: a.contracts?.salary,
+        yearsLeft: a.contracts?.years_remaining,
+        position: a.contracts?.players?.position,
+        capAmount: a.cap_amount,
+        capYear: a.cap_year,
+        pickYear: a.pick_season,
+        pickRound: a.pick_round,
+        salaryByYear: buildSalaryByYear(a.contracts),
+      }))
+
+    const team2Received = (trade.trade_assets || [])
+      .filter((a: any) => a.receiving_team_id === team2.team_id)
+      .map((a: any) => ({
+        type: a.asset_type,
+        name: a.contracts?.players?.full_name || a.description,
+        salary: a.contracts?.salary,
+        yearsLeft: a.contracts?.years_remaining,
+        position: a.contracts?.players?.position,
+        capAmount: a.cap_amount,
+        capYear: a.cap_year,
+        pickYear: a.pick_season,
+        pickRound: a.pick_round,
+        salaryByYear: buildSalaryByYear(a.contracts),
+      }))
+
+    const sheetResult = await sheetExecuteTrade({
+      tradeNumber,
+      team1OwnerName: team1.teams.owner_name,
+      team2OwnerName: team2.teams.owner_name,
+      team1Received,
+      team2Received,
+    })
+
+    return sheetResult.details
+  } catch (err) {
+    console.error('Sheet trade sync error:', err)
+    return [`Sheet sync failed: ${(err as Error).message}`]
+  }
+}
+
+function buildSalaryByYear(contract: any): Record<number, number> {
+  if (!contract) return {}
+  const result: Record<number, number> = {}
+  for (let yr = contract.start_season; yr <= contract.end_season; yr++) {
+    result[yr] = contract.salary
+  }
+  return result
 }
 
 serve(async (req) => {
@@ -63,6 +155,10 @@ serve(async (req) => {
             const { error: execErr } = await supabase.rpc('execute_trade', { p_trade_id: trade_id })
             if (execErr) throw execErr
             await supabase.from('trades').update({ status: 'completed' }).eq('id', trade_id)
+
+            // Sync to Google Sheet
+            const sheetDetails = await syncTradeToSheet(supabase, trade_id)
+            result.sheet_details = sheetDetails
           } else {
             await supabase.from('trades').update({ status: 'accepted' }).eq('id', trade_id)
           }
@@ -70,6 +166,7 @@ serve(async (req) => {
 
         const { data: updatedTrade } = await supabase.from('trades').select('*').eq('id', trade_id).single()
         result = {
+          ...result,
           data: updatedTrade,
           message: pending && pending.length === 0 ? 'All teams accepted' : `Waiting for ${pending?.length} more team(s)`,
         }
@@ -110,7 +207,10 @@ serve(async (req) => {
           commissioner_approved_at: new Date().toISOString(),
         }).eq('id', trade_id)
 
-        result = { message: 'Trade approved and completed' }
+        // Sync to Google Sheet
+        const sheetDetails = await syncTradeToSheet(supabase, trade_id)
+
+        result = { message: 'Trade approved and completed', sheet_details: sheetDetails }
         break
       }
 
