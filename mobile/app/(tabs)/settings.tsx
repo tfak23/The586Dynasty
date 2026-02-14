@@ -1,29 +1,33 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Modal, Switch, ActivityIndicator } from 'react-native';
-import { useState, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Modal, Switch, ActivityIndicator, Platform } from 'react-native';
+import { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, borderRadius } from '@/lib/theme';
-import { initializeLeague, syncLeague, syncRosters, syncPlayers, syncStats, getTeams, getLeagueBySleeperId, getLastSyncTime } from '@/lib/api';
+import { syncLeague, syncRosters, syncPlayers, syncStats, getLastSyncTime } from '@/lib/api';
 import { useAppStore, DEFAULT_ROOKIE_VALUES, SUGGESTED_4_ROUND_VALUES, SUGGESTED_5_ROUND_VALUES } from '@/lib/store';
+import { useAuth } from '@/lib/AuthContext';
+
+const showAlert = (title: string, message?: string) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}${message ? '\n' + message : ''}`);
+  } else {
+    Alert.alert(title, message);
+  }
+};
 
 export default function SettingsScreen() {
   const queryClient = useQueryClient();
+  const { signOut } = useAuth();
   const {
-    currentLeague, setCurrentLeague,
-    currentTeam, setCurrentTeam,
-    teams, setTeams,
-    isCommissioner, setIsCommissioner,
+    currentLeague,
+    currentTeam,
+    isCommissioner,
     settings, setRookieDraftRounds, setRookiePickValue, resetPickValuesToSuggested, setIsOffseason,
     toggleCommissionerTeam,
-    reset
+    teams,
   } = useAppStore();
 
-  // Check if current team is commissioner
-  const isCurrentTeamCommissioner = currentTeam && settings.commissionerTeamIds?.includes(currentTeam.id);
-
-  const [sleeperLeagueId, setSleeperLeagueId] = useState('1315789488873553920'); // Default to The 586
-  const [isConnecting, setIsConnecting] = useState(false);
   const [showRoundsModal, setShowRoundsModal] = useState(false);
   const [showPickValuesModal, setShowPickValuesModal] = useState(false);
   const [editingPick, setEditingPick] = useState<number | null>(null);
@@ -38,22 +42,22 @@ export default function SettingsScreen() {
       return res.data.data;
     },
     enabled: !!currentLeague?.id,
-    refetchInterval: 60000, // Refresh every minute
+    refetchInterval: 60000,
   });
 
-  // Roster sync mutation (quick sync)
+  // Roster sync mutation
   const rosterSyncMutation = useMutation({
     mutationFn: async () => {
       if (!currentLeague) throw new Error('No league connected');
       return syncRosters(currentLeague.id);
     },
     onSuccess: () => {
-      Alert.alert('Success', 'Rosters synced with Sleeper!');
+      showAlert('Success', 'Rosters synced with Sleeper!');
       refetchSyncTime();
       queryClient.invalidateQueries();
     },
     onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to sync rosters');
+      showAlert('Error', error.message || 'Failed to sync rosters');
     },
   });
 
@@ -64,60 +68,27 @@ export default function SettingsScreen() {
     },
     onSuccess: (res) => {
       const data = res.data.data;
-      Alert.alert('Success', `Player database synced!\n${data.synced} players synced, ${data.skipped} skipped.`);
+      showAlert('Success', `Player database synced!\n${data.synced} players synced, ${data.skipped} skipped.`);
       queryClient.invalidateQueries();
     },
     onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to sync player database');
+      showAlert('Error', error.message || 'Failed to sync player database');
     },
   });
 
-  // Stats sync mutation - uses league-specific scoring settings
+  // Stats sync mutation
   const statsSyncMutation = useMutation({
     mutationFn: async () => {
-      // Pass league ID to use league's scoring settings from Sleeper
       return syncStats(2025, currentLeague?.id);
     },
     onSuccess: (res) => {
       const data = res.data.data;
       const scoringInfo = data.scoringType ? `\nScoring: ${data.scoringType}` : '';
-      Alert.alert('Success', `2025 stats synced!\n${data.synced} players updated.${scoringInfo}`);
+      showAlert('Success', `2025 stats synced!\n${data.synced} players updated.${scoringInfo}`);
       queryClient.invalidateQueries();
     },
     onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to sync stats');
-    },
-  });
-
-  const initializeMutation = useMutation({
-    mutationFn: async (sleeperId: string) => {
-      // First try to get existing league
-      try {
-        const existingRes = await getLeagueBySleeperId(sleeperId);
-        return { league: existingRes.data.data, isNew: false };
-      } catch {
-        // League doesn't exist, initialize it
-        const initRes = await initializeLeague(sleeperId);
-        return { league: initRes.data.data.league, isNew: true };
-      }
-    },
-    onSuccess: async (data) => {
-      setCurrentLeague(data.league);
-      
-      // Fetch teams
-      const teamsRes = await getTeams(data.league.id);
-      setTeams(teamsRes.data.data);
-      
-      if (data.isNew) {
-        Alert.alert('Success', 'League initialized! Now sync your data from Sleeper.');
-      } else {
-        Alert.alert('Connected', 'League found and connected!');
-      }
-      
-      queryClient.invalidateQueries();
-    },
-    onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to connect league');
+      showAlert('Error', error.message || 'Failed to sync stats');
     },
   });
 
@@ -127,123 +98,60 @@ export default function SettingsScreen() {
       return syncLeague(currentLeague.id);
     },
     onSuccess: () => {
-      Alert.alert('Success', 'League synced with Sleeper!');
+      showAlert('Success', 'League synced with Sleeper!');
       queryClient.invalidateQueries();
     },
     onError: (error: any) => {
-      Alert.alert('Error', error.message || 'Failed to sync');
+      showAlert('Error', error.message || 'Failed to sync');
     },
   });
 
-  const handleConnect = async () => {
-    if (!sleeperLeagueId.trim()) {
-      Alert.alert('Error', 'Please enter a Sleeper League ID');
-      return;
-    }
-    setIsConnecting(true);
-    try {
-      await initializeMutation.mutateAsync(sleeperLeagueId.trim());
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const handleSelectTeam = (team: any) => {
-    setCurrentTeam(team);
-    // Check if commissioner (simplified - would need API call in real app)
-    setIsCommissioner(team.sleeper_roster_id === 1); // Placeholder
-    Alert.alert('Team Selected', `You are now viewing as ${team.team_name}`);
-  };
-
-  const handleDisconnect = () => {
-    Alert.alert(
-      'Disconnect League',
-      'Are you sure you want to disconnect from this league?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Disconnect', 
-          style: 'destructive',
-          onPress: () => {
-            reset();
-            queryClient.clear();
-          }
-        },
-      ]
-    );
-  };
-
   return (
     <ScrollView style={styles.container}>
-      {/* League Connection */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Sleeper League</Text>
-        
-        {!currentLeague ? (
-          <View style={styles.card}>
-            <Text style={styles.label}>Sleeper League ID</Text>
-            <TextInput
-              style={styles.input}
-              value={sleeperLeagueId}
-              onChangeText={setSleeperLeagueId}
-              placeholder="Enter your Sleeper League ID"
-              placeholderTextColor={colors.textMuted}
-              keyboardType="number-pad"
-            />
-            <Text style={styles.hint}>
-              Find this in the Sleeper app: League Settings → General → League ID
-            </Text>
-            <TouchableOpacity 
-              style={isConnecting ? styles.buttonDisabled : styles.button}
-              onPress={handleConnect}
-              disabled={isConnecting}
-            >
-              <Ionicons name="link" size={18} color={colors.white} />
-              <Text style={styles.buttonText}>
-                {isConnecting ? 'Connecting...' : 'Connect League'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
+      {/* League Info (read-only) */}
+      {currentLeague && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>League</Text>
           <View style={styles.card}>
             <View style={styles.connectedHeader}>
               <Ionicons name="checkmark-circle" size={24} color={colors.success} />
               <Text style={styles.connectedText}>Connected</Text>
             </View>
-            
+
             <View style={styles.leagueInfo}>
               <Text style={styles.leagueName}>{currentLeague.name}</Text>
-              <Text style={styles.leagueDetail}>ID: {currentLeague.sleeper_league_id}</Text>
               <Text style={styles.leagueDetail}>Season: {currentLeague.current_season}</Text>
               <Text style={styles.leagueDetail}>Cap: ${currentLeague.salary_cap}</Text>
             </View>
-            
-            <View style={styles.buttonRow}>
-              <TouchableOpacity 
-                style={styles.buttonSecondary}
-                onPress={() => syncMutation.mutate()}
-                disabled={syncMutation.isPending}
-              >
-                <Ionicons name="refresh" size={18} color={colors.primary} />
-                <Text style={styles.buttonTextSecondary}>
-                  {syncMutation.isPending ? 'Syncing...' : 'Sync'}
-                </Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.buttonDanger}
-                onPress={handleDisconnect}
-              >
-                <Ionicons name="unlink" size={18} color={colors.white} />
-                <Text style={styles.buttonText}>Disconnect</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-      </View>
 
-      {/* Automatic Sync Status */}
-      {currentLeague && (
+            {currentTeam && (
+              <View style={styles.teamBadge}>
+                <Ionicons name="person" size={16} color={colors.primary} />
+                <Text style={styles.teamBadgeText}>Your Team: {currentTeam.team_name}</Text>
+              </View>
+            )}
+
+            {isCommissioner && (
+              <View style={styles.commissionerBadge}>
+                <Ionicons name="shield" size={16} color={colors.warning} />
+                <Text style={styles.commissionerBadgeText}>Commissioner</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+
+      {!currentLeague && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>League</Text>
+          <View style={styles.card}>
+            <Text style={styles.noLeagueText}>No league connected. Complete onboarding to link your Sleeper league.</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Commissioner-only: Sync Controls */}
+      {currentLeague && isCommissioner && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Sleeper Sync</Text>
           <View style={styles.card}>
@@ -272,7 +180,7 @@ export default function SettingsScreen() {
               </View>
             </View>
 
-            <View style={styles.syncButtonRow}>
+            <View style={styles.buttonRow}>
               <TouchableOpacity
                 style={rosterSyncMutation.isPending ? styles.syncButtonDisabled : styles.syncButton}
                 onPress={() => rosterSyncMutation.mutate()}
@@ -284,7 +192,18 @@ export default function SettingsScreen() {
                   <Ionicons name="refresh" size={18} color={colors.white} />
                 )}
                 <Text style={styles.syncButtonText}>
-                  {rosterSyncMutation.isPending ? 'Syncing...' : 'Sync Now'}
+                  {rosterSyncMutation.isPending ? 'Syncing...' : 'Sync Rosters'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={syncMutation.isPending ? styles.syncButtonDisabled : styles.buttonSecondary}
+                onPress={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+              >
+                <Ionicons name="refresh" size={18} color={colors.primary} />
+                <Text style={styles.buttonTextSecondary}>
+                  {syncMutation.isPending ? 'Syncing...' : 'Sync League'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -336,35 +255,64 @@ export default function SettingsScreen() {
         </View>
       )}
 
-      {/* Team Selection */}
-      {currentLeague && teams.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Select Your Team</Text>
-          <View style={styles.card}>
-            {teams.map((team) => (
-              <TouchableOpacity
-                key={team.id}
-                style={currentTeam?.id === team.id ? styles.teamRowSelected : styles.teamRow}
-                onPress={() => handleSelectTeam(team)}
-              >
-                <View style={styles.teamInfo}>
-                  <Text style={styles.teamName}>{team.team_name}</Text>
-                  <Text style={styles.ownerName}>{team.owner_name}</Text>
-                </View>
-                {currentTeam?.id === team.id && (
-                  <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      )}
-
-      {/* Commissioner Settings */}
-      {currentLeague && teams.length > 0 && (
+      {/* Commissioner-only: Draft & League Settings */}
+      {currentLeague && isCommissioner && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Commissioner Settings</Text>
           <View style={styles.card}>
+            {/* Draft Settings */}
+            <Text style={styles.subsectionTitle}>Draft Settings</Text>
+
+            {/* Offseason Mode Toggle */}
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Offseason Mode</Text>
+                <Text style={styles.settingHint}>
+                  Include rookie draft picks in cap calculations
+                </Text>
+              </View>
+              <Switch
+                value={settings.isOffseason}
+                onValueChange={setIsOffseason}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={colors.white}
+              />
+            </View>
+
+            {/* Rounds Dropdown */}
+            <TouchableOpacity
+              style={styles.settingRow}
+              onPress={() => setShowRoundsModal(true)}
+            >
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Rookie Draft Rounds</Text>
+                <Text style={styles.settingHint}>Number of rounds in the rookie draft</Text>
+              </View>
+              <View style={styles.dropdownValue}>
+                <Text style={styles.dropdownText}>{settings.rookieDraftRounds} Rounds</Text>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </View>
+            </TouchableOpacity>
+
+            {/* Pick Values Editor */}
+            <TouchableOpacity
+              style={styles.settingRow}
+              onPress={() => setShowPickValuesModal(true)}
+            >
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Rookie Pick Salaries</Text>
+                <Text style={styles.settingHint}>Edit salary cap values for each pick</Text>
+              </View>
+              <View style={styles.dropdownValue}>
+                <Text style={styles.dropdownText}>Edit</Text>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </View>
+            </TouchableOpacity>
+
+            {/* Commissioner Tools */}
+            <View style={styles.divider} />
+
+            <Text style={styles.subsectionTitle}>Commissioner Access</Text>
             <Text style={styles.commissionerHint}>
               Select which teams have commissioner access to manage league settings, trades, and rosters.
             </Text>
@@ -391,70 +339,44 @@ export default function SettingsScreen() {
             })}
 
             {/* Commissioner Tools Button */}
-            {isCurrentTeamCommissioner && (
-              <TouchableOpacity
-                style={styles.commissionerToolsButton}
-                onPress={() => router.push('/commissioner')}
-              >
-                <Ionicons name="shield-outline" size={20} color={colors.white} />
-                <Text style={styles.commissionerToolsText}>Commissioner Tools</Text>
-                <Ionicons name="chevron-forward" size={20} color={colors.white} />
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              style={styles.commissionerToolsButton}
+              onPress={() => router.push('/commissioner')}
+            >
+              <Ionicons name="shield-outline" size={20} color={colors.white} />
+              <Text style={styles.commissionerToolsText}>Commissioner Tools</Text>
+              <Ionicons name="chevron-forward" size={20} color={colors.white} />
+            </TouchableOpacity>
           </View>
         </View>
       )}
 
-      {/* Draft Preferences */}
+      {/* App Info */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Draft Settings</Text>
+        <Text style={styles.sectionTitle}>About</Text>
         <View style={styles.card}>
-          {/* Offseason Mode Toggle */}
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Offseason Mode</Text>
-              <Text style={styles.settingHint}>
-                Include rookie draft picks in cap calculations
-              </Text>
-            </View>
-            <Switch
-              value={settings.isOffseason}
-              onValueChange={setIsOffseason}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor={colors.white}
-            />
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>App Version</Text>
+            <Text style={styles.infoValue}>1.0.0</Text>
           </View>
-
-          {/* Rounds Dropdown */}
-          <TouchableOpacity 
-            style={styles.settingRow}
-            onPress={() => setShowRoundsModal(true)}
-          >
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Rookie Draft Rounds</Text>
-              <Text style={styles.settingHint}>Number of rounds in the rookie draft</Text>
-            </View>
-            <View style={styles.dropdownValue}>
-              <Text style={styles.dropdownText}>{settings.rookieDraftRounds} Rounds</Text>
-              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-            </View>
-          </TouchableOpacity>
-
-          {/* Pick Values Editor */}
-          <TouchableOpacity 
-            style={styles.settingRow}
-            onPress={() => setShowPickValuesModal(true)}
-          >
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Rookie Pick Salaries</Text>
-              <Text style={styles.settingHint}>Edit salary cap values for each pick</Text>
-            </View>
-            <View style={styles.dropdownValue}>
-              <Text style={styles.dropdownText}>Edit</Text>
-              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-            </View>
-          </TouchableOpacity>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Current Season</Text>
+            <Text style={styles.infoValue}>2025</Text>
+          </View>
         </View>
+      </View>
+
+      {/* Sign Out */}
+      <View style={styles.section}>
+        <TouchableOpacity
+          style={styles.signOutButton}
+          onPress={async () => {
+            await signOut();
+          }}
+        >
+          <Ionicons name="log-out-outline" size={20} color={colors.error} />
+          <Text style={styles.signOutText}>Sign Out</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Rounds Selection Modal */}
@@ -472,14 +394,13 @@ export default function SettingsScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            
+
             {([3, 4, 5] as const).map((rounds) => (
               <TouchableOpacity
                 key={rounds}
                 style={settings.rookieDraftRounds === rounds ? styles.optionSelected : styles.option}
                 onPress={() => {
                   setRookieDraftRounds(rounds);
-                  // Auto-reset pick values when changing rounds
                   resetPickValuesToSuggested(rounds);
                   setShowRoundsModal(false);
                 }}
@@ -502,7 +423,7 @@ export default function SettingsScreen() {
               style={styles.suggestButton}
               onPress={() => {
                 resetPickValuesToSuggested(settings.rookieDraftRounds);
-                Alert.alert('Updated', `Pick values reset to suggested values for ${settings.rookieDraftRounds}-round draft`);
+                showAlert('Updated', `Pick values reset to suggested values for ${settings.rookieDraftRounds}-round draft`);
               }}
             >
               <Ionicons name="refresh" size={18} color={colors.primary} />
@@ -527,13 +448,12 @@ export default function SettingsScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.pickValuesList}>
               {Array.from({ length: settings.rookieDraftRounds }, (_, roundIndex) => {
                 const round = roundIndex + 1;
                 const startPick = roundIndex * 12 + 1;
-                const endPick = startPick + 11;
-                
+
                 return (
                   <View key={round} style={styles.roundSection}>
                     <Text style={styles.roundTitle}>Round {round}</Text>
@@ -545,7 +465,7 @@ export default function SettingsScreen() {
                         const pickNumber = startPick + i;
                         const pickInRound = i + 1;
                         const value = settings.rookiePickValues[pickNumber] || 1;
-                        
+
                         return (
                           <TouchableOpacity
                             key={pickNumber}
@@ -593,25 +513,8 @@ export default function SettingsScreen() {
               <TouchableOpacity
                 style={styles.resetButton}
                 onPress={() => {
-                  Alert.alert(
-                    'Reset Pick Values',
-                    'Choose which values to apply:',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      { 
-                        text: '3-Round Default', 
-                        onPress: () => resetPickValuesToSuggested(3)
-                      },
-                      { 
-                        text: '4-Round Suggested', 
-                        onPress: () => resetPickValuesToSuggested(4)
-                      },
-                      { 
-                        text: '5-Round Suggested', 
-                        onPress: () => resetPickValuesToSuggested(5)
-                      },
-                    ]
-                  );
+                  resetPickValuesToSuggested(settings.rookieDraftRounds);
+                  showAlert('Reset', `Pick values reset to suggested values for ${settings.rookieDraftRounds}-round draft`);
                 }}
               >
                 <Ionicons name="refresh" size={18} color={colors.white} />
@@ -621,21 +524,6 @@ export default function SettingsScreen() {
           </View>
         </View>
       </Modal>
-
-      {/* App Info */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>About</Text>
-        <View style={styles.card}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>App Version</Text>
-            <Text style={styles.infoValue}>1.0.0</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Current Season</Text>
-            <Text style={styles.infoValue}>2025</Text>
-          </View>
-        </View>
-      </View>
 
       <View style={{ height: 50 }} />
     </ScrollView>
@@ -656,88 +544,17 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: spacing.md,
   },
+  subsectionTitle: {
+    fontSize: fontSize.base,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.sm,
+    marginTop: spacing.sm,
+  },
   card: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
     padding: spacing.md,
-  },
-  label: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
-  },
-  input: {
-    backgroundColor: colors.backgroundSecondary,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    fontSize: fontSize.md,
-    color: colors.text,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  hint: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-    marginTop: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    marginTop: spacing.sm,
-  },
-  buttonDisabled: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    marginTop: spacing.sm,
-    opacity: 0.6,
-  },
-  buttonSecondary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    marginTop: spacing.sm,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: colors.primary,
-    flex: 1,
-  },
-  buttonDanger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    marginTop: spacing.sm,
-    backgroundColor: colors.error,
-    flex: 1,
-    marginLeft: spacing.sm,
-  },
-  buttonText: {
-    color: colors.white,
-    fontWeight: '600',
-    fontSize: fontSize.md,
-    marginLeft: spacing.sm,
-  },
-  buttonTextSecondary: {
-    color: colors.primary,
-    fontWeight: '600',
-    fontSize: fontSize.md,
-    marginLeft: spacing.sm,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    marginTop: spacing.md,
   },
   connectedHeader: {
     flexDirection: 'row',
@@ -766,51 +583,178 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: spacing.xs,
   },
-  teamRow: {
+  teamBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  teamRowSelected: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    marginTop: spacing.md,
     backgroundColor: colors.primaryDark + '20',
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
   },
-  teamInfo: {
+  teamBadgeText: {
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+    color: colors.primary,
+    marginLeft: spacing.sm,
+  },
+  commissionerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    backgroundColor: colors.warning + '20',
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+  },
+  commissionerBadgeText: {
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+    color: colors.warning,
+    marginLeft: spacing.sm,
+  },
+  noLeagueText: {
+    fontSize: fontSize.base,
+    color: colors.textMuted,
+    textAlign: 'center',
+    padding: spacing.md,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    marginTop: spacing.md,
+    gap: spacing.sm,
+  },
+  buttonSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.primary,
     flex: 1,
   },
-  teamName: {
+  buttonTextSecondary: {
+    color: colors.primary,
+    fontWeight: '600',
     fontSize: fontSize.md,
+    marginLeft: spacing.sm,
+  },
+  // Sync styles
+  syncStatusRow: {
+    marginBottom: spacing.md,
+  },
+  syncStatusInfo: {
+    flex: 1,
+  },
+  syncStatusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  syncStatusLabel: {
+    fontSize: fontSize.base,
     fontWeight: '600',
     color: colors.text,
+    marginLeft: spacing.sm,
   },
-  ownerName: {
+  syncStatusText: {
+    fontSize: fontSize.md,
+    color: colors.textSecondary,
+    marginLeft: spacing.lg + spacing.sm,
+  },
+  syncHint: {
     fontSize: fontSize.sm,
     color: colors.textMuted,
     marginTop: spacing.xs,
+    marginLeft: spacing.lg + spacing.sm,
   },
-  infoRow: {
+  syncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    flex: 1,
+  },
+  syncButtonDisabled: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    flex: 1,
+    opacity: 0.6,
+  },
+  syncButtonText: {
+    color: colors.white,
+    fontWeight: '600',
+    fontSize: fontSize.md,
+    marginLeft: spacing.sm,
+  },
+  syncNote: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.md,
+    fontStyle: 'italic',
+  },
+  advancedSyncSection: {
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  advancedSyncTitle: {
+    fontSize: fontSize.base,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  advancedSyncHint: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    marginBottom: spacing.md,
+  },
+  advancedSyncButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  smallSyncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
     paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    flex: 1,
+    marginHorizontal: spacing.xs,
   },
-  infoLabel: {
-    fontSize: fontSize.base,
-    color: colors.textSecondary,
+  smallSyncButtonDisabled: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    flex: 1,
+    marginHorizontal: spacing.xs,
+    opacity: 0.6,
   },
-  infoValue: {
-    fontSize: fontSize.base,
-    color: colors.text,
+  smallSyncButtonText: {
+    color: colors.primary,
+    fontWeight: '600',
+    fontSize: fontSize.sm,
+    marginLeft: spacing.xs,
   },
+  // Settings styles
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -840,6 +784,88 @@ const styles = StyleSheet.create({
     color: colors.primary,
     marginRight: spacing.xs,
   },
+  divider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.md,
+  },
+  // Commissioner styles
+  commissionerHint: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    marginBottom: spacing.md,
+    lineHeight: 20,
+  },
+  commissionerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  teamInfo: {
+    flex: 1,
+  },
+  teamName: {
+    fontSize: fontSize.md,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  ownerName: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  commissionerToolsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.warning,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.md,
+    gap: spacing.sm,
+  },
+  commissionerToolsText: {
+    color: colors.white,
+    fontWeight: '600',
+    fontSize: fontSize.md,
+    flex: 1,
+  },
+  // Info styles
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  infoLabel: {
+    fontSize: fontSize.base,
+    color: colors.textSecondary,
+  },
+  infoValue: {
+    fontSize: fontSize.base,
+    color: colors.text,
+  },
+  // Sign out
+  signOutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.error,
+  },
+  signOutText: {
+    color: colors.error,
+    fontWeight: '600',
+    fontSize: fontSize.md,
+    marginLeft: spacing.sm,
+  },
+  // Modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
@@ -985,152 +1011,5 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: '600',
     marginLeft: spacing.sm,
-  },
-  // Sync status styles
-  syncStatusRow: {
-    marginBottom: spacing.md,
-  },
-  syncStatusInfo: {
-    flex: 1,
-  },
-  syncStatusHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-  },
-  syncStatusLabel: {
-    fontSize: fontSize.base,
-    fontWeight: '600',
-    color: colors.text,
-    marginLeft: spacing.sm,
-  },
-  syncStatusText: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    marginLeft: spacing.lg + spacing.sm,
-  },
-  syncHint: {
-    fontSize: fontSize.sm,
-    color: colors.textMuted,
-    marginTop: spacing.xs,
-    marginLeft: spacing.lg + spacing.sm,
-  },
-  syncButtonRow: {
-    marginTop: spacing.sm,
-  },
-  syncButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-  },
-  syncButtonDisabled: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    opacity: 0.6,
-  },
-  syncButtonText: {
-    color: colors.white,
-    fontWeight: '600',
-    fontSize: fontSize.md,
-    marginLeft: spacing.sm,
-  },
-  syncNote: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-    textAlign: 'center',
-    marginTop: spacing.md,
-    fontStyle: 'italic',
-  },
-  advancedSyncSection: {
-    marginTop: spacing.lg,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  advancedSyncTitle: {
-    fontSize: fontSize.base,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  advancedSyncHint: {
-    fontSize: fontSize.sm,
-    color: colors.textMuted,
-    marginBottom: spacing.md,
-  },
-  advancedSyncButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  smallSyncButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    flex: 1,
-    marginHorizontal: spacing.xs,
-  },
-  smallSyncButtonDisabled: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    flex: 1,
-    marginHorizontal: spacing.xs,
-    opacity: 0.6,
-  },
-  smallSyncButtonText: {
-    color: colors.primary,
-    fontWeight: '600',
-    fontSize: fontSize.sm,
-    marginLeft: spacing.xs,
-  },
-  // Commissioner styles
-  commissionerHint: {
-    fontSize: fontSize.sm,
-    color: colors.textMuted,
-    marginBottom: spacing.md,
-    lineHeight: 20,
-  },
-  commissionerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  commissionerToolsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.warning,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    marginTop: spacing.md,
-    gap: spacing.sm,
-  },
-  commissionerToolsText: {
-    color: colors.white,
-    fontWeight: '600',
-    fontSize: fontSize.md,
-    flex: 1,
   },
 });

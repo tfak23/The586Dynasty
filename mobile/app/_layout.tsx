@@ -4,8 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { colors } from '@/lib/theme';
 import { useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
-import { api } from '@/lib/api';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
+import { supabase } from '@/lib/supabase';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,24 +18,54 @@ const queryClient = new QueryClient({
 
 // Component to auto-load league on startup
 function LeagueLoader() {
-  const { currentLeague, setCurrentLeague, setTeams } = useAppStore();
+  const { currentLeague, setCurrentLeague, setTeams, setCurrentTeam, setIsCommissioner } = useAppStore();
+  const { user, profile } = useAuth();
 
   useEffect(() => {
     const loadLeague = async () => {
-      // Skip if league already loaded
-      if (currentLeague) return;
-      
+      if (currentLeague || !user) return;
+
       try {
-        // Fetch first available league
-        const response = await api.get('/leagues');
-        const leagues = response.data.data;
-        
-        if (leagues && leagues.length > 0) {
-          setCurrentLeague(leagues[0]);
-          
-          // Also fetch teams
-          const teamsRes = await api.get(`/teams/league/${leagues[0].id}`);
-          setTeams(teamsRes.data.data);
+        // Find user's league membership
+        const { data: membership, error: memberError } = await supabase
+          .from('league_members')
+          .select('league_id, role')
+          .eq('user_id', user.id)
+          .eq('status', 'active')
+          .limit(1)
+          .maybeSingle();
+
+        if (memberError || !membership) return;
+
+        // Fetch the league
+        const { data: league, error: leagueError } = await supabase
+          .from('leagues')
+          .select('*')
+          .eq('id', membership.league_id)
+          .single();
+
+        if (leagueError || !league) return;
+
+        setCurrentLeague(league);
+        setIsCommissioner(membership.role === 'commissioner' || membership.role === 'co-commissioner');
+
+        // Fetch teams
+        const { data: teams, error: teamsError } = await supabase
+          .from('teams')
+          .select('*')
+          .eq('league_id', league.id)
+          .order('team_name');
+
+        if (teamsError || !teams) return;
+
+        setTeams(teams);
+
+        // Auto-match user's team by sleeper_user_id
+        if (profile?.sleeper_user_id) {
+          const myTeam = teams.find((t: any) => t.sleeper_user_id === profile.sleeper_user_id);
+          if (myTeam) {
+            setCurrentTeam(myTeam);
+          }
         }
       } catch (error) {
         console.log('Could not auto-load league:', error);
@@ -43,7 +73,7 @@ function LeagueLoader() {
     };
 
     loadLeague();
-  }, [currentLeague, setCurrentLeague, setTeams]);
+  }, [currentLeague, user, profile]);
 
   return null;
 }
