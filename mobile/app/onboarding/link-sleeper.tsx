@@ -57,13 +57,13 @@ export default function LinkSleeperScreen() {
       if (!response.ok) {
         console.error('Edge function error:', response.status, result);
         const errorCode = result?.code || '';
-        const errorMsg = result?.error || 'Failed to link Sleeper account';
+        const errorMsg = result?.error || result?.message || JSON.stringify(result);
         if (errorCode === 'SLEEPER_USERNAME_TAKEN') {
           showAlert('Username Already Linked', 'This Sleeper username is already linked to another account.');
         } else if (errorCode === 'SLEEPER_USER_NOT_FOUND') {
           showAlert('Username Not Found', 'This Sleeper username does not exist. Please check your spelling.');
         } else {
-          showAlert('Error', errorMsg);
+          showAlert('Error', `${errorMsg} (HTTP ${response.status})`);
         }
         return;
       }
